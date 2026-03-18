@@ -1,6 +1,14 @@
-# Claude Guardian
+<p align="center">
+  <img src="assets/claude.png" width="128" alt="Claude Guardian mascot">
+</p>
 
-A native macOS overlay app that acts as a permission manager for Claude Code CLI sessions. When Claude wants to run a shell command, write a file, or perform any action — a floating widget appears on your screen with the details, so you can approve or deny without switching to your terminal.
+<h1 align="center">Claude Guardian</h1>
+
+<p align="center">
+  <em>A living mascot that floats above your windows, guards your Claude Code sessions, and lets you approve or deny actions without leaving your flow.</em>
+</p>
+
+---
 
 Each terminal session gets its own mascot — run 3 projects at once and you'll see 3 independent mascots on screen, each handling their own permission requests.
 
