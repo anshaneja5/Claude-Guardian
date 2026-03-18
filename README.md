@@ -5,47 +5,24 @@ A native macOS overlay app that acts as a permission manager for Claude Code CLI
 ## How It Works
 
 ```mermaid
-sequenceDiagram
-    participant CC as Claude Code
-    participant Hook as pre_tool_use.py
-    participant Config as guardian.config.json
-    participant Server as Guardian HTTP Server
-    participant UI as Mascot Widget
+flowchart LR
+    A["Claude Code\nwants to run a tool"] --> B{"Config check"}
+    B -->|"Safe tool\n(Read, Glob...)"| C["Auto-approved"]
+    B -->|"Blocked tool"| D["Auto-denied"]
+    B -->|"Needs approval"| E["Guardian App\nshows overlay"]
+    E --> F{"You decide"}
+    F -->|"Click Allow"| G["Tool runs"]
+    F -->|"Click Deny"| H["Tool blocked\n+ message to Claude"]
+    F -->|"No response"| I["Auto-denied\nafter timeout"]
 
-    CC->>Hook: PreToolUse event (stdin JSON)
-    Hook->>Config: Check auto_approve / always_block
-
-    alt Tool is auto-approved
-        Hook-->>CC: permissionDecision: "allow"
-    else Tool is always blocked
-        Hook-->>CC: permissionDecision: "deny"
-    else Tool needs user approval
-        Hook->>Server: POST /request (tool details)
-        Server->>UI: Show permission panel
-        UI->>UI: User sees tool name + content
-
-        alt User clicks Allow
-            UI->>Server: Decision: approved
-        else User clicks Deny
-            UI->>Server: Decision: denied + message
-        else Timeout
-            UI->>Server: Decision: timeout (auto-deny)
-        end
-
-        loop Poll until decision
-            Hook->>Server: GET /decision/{id}
-            Server-->>Hook: status: pending / approved / denied
-        end
-
-        Hook-->>CC: permissionDecision + reason
-    end
+    style A fill:#f4845f,color:#fff
+    style C fill:#4ade80,color:#000
+    style D fill:#f87171,color:#fff
+    style E fill:#fbbf24,color:#000
+    style G fill:#4ade80,color:#000
+    style H fill:#f87171,color:#fff
+    style I fill:#f87171,color:#fff
 ```
-
-1. Claude Code triggers a **PreToolUse hook** before every tool call
-2. The hook script (`pre_tool_use.py`) checks the config — auto-approves safe tools (Read, Glob, etc.), auto-blocks banned tools, and forwards everything else to the Guardian app via HTTP
-3. The Guardian app shows a **permission panel** attached to a pixel art mascot widget on your screen
-4. You click **Allow** or **Deny** (with an optional message back to Claude)
-5. The hook receives your decision and tells Claude Code to proceed or stop
 
 ## Quick Start
 
