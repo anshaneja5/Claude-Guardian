@@ -1,0 +1,9 @@
+# Compiled binary
+app/ClaudeGuardian/ClaudeGuardian
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+*.err

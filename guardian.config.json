@@ -1,0 +1,18 @@
+{
+  "port": 9001,
+  "timeout_seconds": 300,
+  "mascot": "cat",
+  "auto_approve": [
+    "Read",
+    "Glob",
+    "Grep",
+    "LS"
+  ],
+  "always_block": [],
+  "ask": [
+    "Bash",
+    "Write",
+    "Edit",
+    "NotebookEdit"
+  ]
+}
