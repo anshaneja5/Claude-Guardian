@@ -137,6 +137,7 @@ class SessionState: ObservableObject, Identifiable {
     @Published var currentRequest: PermissionRequest?
     @Published var countdown: Int = 300
     @Published var showOverlay: Bool = false
+    @Published var hidden: Bool = false  // user dismissed mascot but session is alive
     @Published var mascotName: String
     @Published var costUsd: Double = 0.0
     @Published var terminalPid: Int = 0      // PID of the terminal app
@@ -253,6 +254,15 @@ class AppState: ObservableObject {
     // MARK: Permission flow
 
     func submitRequest(_ request: PermissionRequest) -> String {
+        // If session is hidden, auto-approve so hook doesn't hang
+        // (Claude Code's own permission system will still apply)
+        if let session = sessions.first(where: { $0.id == request.sessionId }), session.hidden {
+            lock.lock()
+            decisions[request.id] = (status: .approved, message: "")
+            lock.unlock()
+            return request.id
+        }
+
         lock.lock()
         decisions[request.id] = (status: .pending, message: "")
         lock.unlock()
@@ -637,6 +647,20 @@ struct SessionWidgetView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // === Close button (top-right) ===
+            HStack {
+                Spacer()
+                Button(action: { session.hidden = true }) {
+                    Text("\u{2715}")
+                        .font(.system(size: 8 * session.widgetScale, weight: .bold))
+                        .foregroundColor(.white.opacity(0.3))
+                        .frame(width: 12 * session.widgetScale, height: 12 * session.widgetScale)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 3 * session.widgetScale)
+                .padding(.trailing, 4 * session.widgetScale)
+            }
+
             // === Mascot + session label ===
             VStack(spacing: 3 * session.widgetScale) {
                 AnimatedMascot(size: 52 * session.widgetScale, status: session.status, mascotName: session.mascotName)
@@ -1014,9 +1038,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        // Bring pending sessions to front
+        // Handle hidden/visible and pending sessions
         for session in appState.sessions {
-            if session.showOverlay, let window = sessionWindows[session.id] {
+            guard let window = sessionWindows[session.id] else { continue }
+
+            // If hidden, stay hidden — don't un-hide for permission requests
+
+            if session.hidden {
+                window.orderOut(nil)
+            } else if !window.isVisible {
+                window.orderFrontRegardless()
+            }
+
+            if session.showOverlay {
                 window.makeKeyAndOrderFront(nil)
                 NSApp.activate(ignoringOtherApps: true)
             }
