@@ -2,6 +2,8 @@
 
 A native macOS overlay app that acts as a permission manager for Claude Code CLI sessions. When Claude wants to run a shell command, write a file, or perform any action — a floating widget appears on your screen with the details, so you can approve or deny without switching to your terminal.
 
+Each terminal session gets its own mascot — run 3 projects at once and you'll see 3 independent mascots on screen, each handling their own permission requests.
+
 ## How It Works
 
 ```mermaid
@@ -31,14 +33,12 @@ flowchart LR
 ```
 
 This will:
-1. Compile the Swift app using your system's Swift toolchain
-2. Install the PreToolUse hook into `~/.claude/settings.json`
+1. Compile the Swift app
+2. Install `PreToolUse`, `SessionStart`, and `SessionEnd` hooks into `~/.claude/settings.json`
 3. Create a LaunchAgent so Guardian starts on login
-4. Launch the app immediately
+4. Launch the app
 
 ### Manual Start
-
-If you prefer to run it manually:
 
 ```bash
 # Build
@@ -52,15 +52,26 @@ swiftc -o ClaudeGuardian Sources/main.swift Sources/sprites.swift \
 
 ## Features
 
-### Mascot Widget
-- An animated pixel art mascot lives in the bottom-right corner of your screen
-- Always-on-top, draggable to any position
-- Shows current status: **IDLE**, **WORKING**, **NEEDS YOU**, **APPROVED!**, **DENIED**
+### Multi-Session Support
+- Each Claude Code session gets its **own mascot widget** on screen
+- Mascots appear when a session starts, disappear when it ends
+- Each widget is **independently draggable** — place them wherever you want
+- Each widget shows the **project folder name** so you know which session is which
+- Permission requests are routed to the correct session's mascot
+- No sessions running = no mascots on screen (just the menubar icon)
+
+### Clickable Mascots
+- **Click any mascot to cycle through all 6 mascot styles**
+- Each session can have a different mascot — cat for your API project, dragon for your frontend
+- The `mascot` field in config sets the default for new sessions
+
+### Animated Pixel Art
 - Animations change based on state:
   - **Idle**: breathing + blinking cycle
   - **Permission pending**: waving / ear wiggle
   - **Approved**: happy expression (^_^)
   - **Denied**: sad expression with droopy ears
+- Status label below each mascot: **IDLE**, **WORKING**, **NEEDS YOU**, **APPROVED!**, **DENIED**
 
 ### Permission Panel
 - Expands below the mascot when Claude needs approval
@@ -74,8 +85,9 @@ swiftc -o ClaudeGuardian Sources/main.swift Sources/sprites.swift \
 - Panel collapses back to just the mascot after you respond
 
 ### Menu Bar
-- Status icon in the macOS menu bar: 🟢 idle, 🟠 active, 🔴 needs attention, ✅ just approved, ❌ just denied
+- Status icon in the macOS menu bar: 🟢 no sessions, 🟠 active, 🔴 needs attention, ✅ just approved, ❌ just denied
 - Click the icon to see:
+  - Active session count
   - Approve/deny stats
   - Searchable action history log (last 50 actions)
   - Filter bar to search by tool name or content
@@ -102,38 +114,37 @@ Edit `guardian.config.json`:
 
 | Field | Description |
 |-------|-------------|
-| `port` | HTTP port for hook ↔ app communication (default `9001`) |
+| `port` | HTTP port for hook-to-app communication (default `9001`) |
 | `timeout_seconds` | Auto-deny after this many seconds of no response (default `300`) |
-| `mascot` | Which pixel art mascot to display (see below) |
+| `mascot` | Default mascot for new sessions (can be changed per-session by clicking) |
 | `auto_approve` | Tool names that pass through without asking |
 | `always_block` | Tool names that are always denied |
-| `ask` | Tool names that show the permission overlay (everything not in the above two lists also defaults to asking) |
+| `ask` | Tool names that show the permission overlay |
 
 ### Mascots
 
-Set `"mascot"` to any of these values. Here's what each one looks like:
+Set `"mascot"` in config for the default, or **click any mascot on screen** to cycle through them live:
 
 | `"claude"` | `"cat"` | `"owl"` | `"skull"` | `"dog"` | `"dragon"` |
 |:-:|:-:|:-:|:-:|:-:|:-:|
 | <img src="assets/claude.png" width="64"> | <img src="assets/cat.png" width="64"> | <img src="assets/owl.png" width="64"> | <img src="assets/skull.png" width="64"> | <img src="assets/dog.png" width="64"> | <img src="assets/dragon.png" width="64"> |
 | Coral Claude | Dark Gray Cat | Brown Owl | Pixel Skull | Golden Puppy | Green Dragon |
 
-Change the mascot anytime — just edit the config and restart the app.
-
 ## Architecture
 
-### Hook Script (`hook/pre_tool_use.py`)
-- Receives JSON on stdin from Claude Code's PreToolUse hook event
-- Reads `guardian.config.json` to check auto-approve/block lists
-- For tools that need approval: POSTs to `localhost:9001/request`, then polls `localhost:9001/decision/{id}` until the user responds
-- Returns JSON to Claude Code with `permissionDecision: "allow"` or `"deny"` and an optional reason
+### Hooks (installed in `~/.claude/settings.json`)
+| Hook | Script | Purpose |
+|------|--------|---------|
+| `PreToolUse` | `hook/pre_tool_use.py` | Intercepts tool calls, blocks until user approves/denies |
+| `SessionStart` | `hook/session_lifecycle.py` | Notifies Guardian to spawn a mascot |
+| `SessionEnd` | `hook/session_lifecycle.py` | Notifies Guardian to remove the mascot |
 
 ### Swift App (`app/ClaudeGuardian/Sources/`)
-- **`main.swift`**: App delegate, HTTP server (NWListener), window management, SwiftUI views for the unified widget, history popover, and menu bar
+- **`main.swift`**: App delegate with per-session window management, HTTP server (NWListener), SwiftUI views, menubar
 - **`sprites.swift`**: All pixel art mascot sprites (16x16 grids) with animation frames and color palettes
 - Runs as a menubar-only app (no Dock icon)
-- HTTP server on the configured port handles `/health`, `/request`, and `/decision/{id}` endpoints
-- The overlay window uses `.screenSaver` level to appear above fullscreen apps
+- HTTP server handles `/health`, `/request`, `/session`, and `/decision/{id}` endpoints
+- Each session window uses `.screenSaver` level to appear above fullscreen apps
 
 ## File Structure
 
@@ -142,11 +153,12 @@ claude-guardian/
 ├── setup.sh                              # One-command install + build + launch
 ├── guardian.config.json                   # Runtime config (port, timeout, mascot, rules)
 ├── hook/
-│   └── pre_tool_use.py                   # Claude Code PreToolUse hook script
+│   ├── pre_tool_use.py                   # PreToolUse hook (blocks until decision)
+│   └── session_lifecycle.py              # SessionStart/SessionEnd hook (fire-and-forget)
 ├── app/
 │   └── ClaudeGuardian/
 │       └── Sources/
-│           ├── main.swift                # App, HTTP server, UI views
+│           ├── main.swift                # App, HTTP server, per-session windows, UI
 │           └── sprites.swift             # Pixel art mascot sprite data
 ├── assets/                               # Generated mascot preview images
 │   ├── claude.png
@@ -176,8 +188,8 @@ pkill -f ClaudeGuardian
 launchctl unload ~/Library/LaunchAgents/com.claudeguardian.app.plist
 rm ~/Library/LaunchAgents/com.claudeguardian.app.plist
 
-# 3. Remove the hook from Claude Code settings
-# Edit ~/.claude/settings.json and delete the PreToolUse entry
+# 3. Remove hooks from Claude Code settings
+# Edit ~/.claude/settings.json and delete PreToolUse, SessionStart, SessionEnd entries
 
 # 4. Delete the project folder
 rm -rf /path/to/claude-guardian
@@ -189,6 +201,7 @@ rm -rf /path/to/claude-guardian
 |-----|--------|
 | `Enter` / `Return` | Allow the pending action |
 | `Escape` | Deny (first press reveals message field, second press sends) |
+| Click mascot | Cycle to next mascot style |
 
 ## Troubleshooting
 
@@ -199,4 +212,10 @@ rm -rf /path/to/claude-guardian
 
 **Overlay doesn't appear**: Check that the Guardian app is running (`curl http://localhost:9001/health` should return `{"status":"ok"}`). If not, launch it manually.
 
-**Port conflict**: If port 9001 is taken, change `"port"` in both `guardian.config.json` and the hook script's `GUARDIAN_PORT` variable.
+**Port conflict**: If port 9001 is taken, change `"port"` in both `guardian.config.json` and the hook scripts' `GUARDIAN_PORT` variable.
+
+**Mascot doesn't appear for a session**: Make sure `SessionStart` and `SessionEnd` hooks are installed in `~/.claude/settings.json`. Run `./setup.sh` again to reinstall all hooks.
+
+## Credits
+
+- Cat pixel art sprites based on "Cats - Pixel Art" by peony ([OpenGameArt](https://opengameart.org), CC-BY 4.0)

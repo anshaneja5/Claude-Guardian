@@ -42,13 +42,8 @@ enum RequestStatus: String, Codable {
 }
 
 enum AnyCodableValue: Codable {
-    case string(String)
-    case int(Int)
-    case double(Double)
-    case bool(Bool)
-    case array([AnyCodableValue])
-    case object([String: AnyCodableValue])
-    case null
+    case string(String), int(Int), double(Double), bool(Bool)
+    case array([AnyCodableValue]), object([String: AnyCodableValue]), null
 
     init(from decoder: Decoder) throws {
         let container = try decoder.singleValueContainer()
@@ -92,10 +87,11 @@ struct HistoryEntry: Identifiable {
     let toolName: String
     let summary: String
     let decision: RequestStatus
+    let sessionId: String
     let timestamp: Date
 }
 
-// MARK: - Guardian Config
+// MARK: - Config
 
 struct GuardianConfig: Codable {
     let port: Int
@@ -105,11 +101,10 @@ struct GuardianConfig: Codable {
     let mascot: String
 
     enum CodingKeys: String, CodingKey {
-        case port
+        case port, mascot
         case timeoutSeconds = "timeout_seconds"
         case autoApprove = "auto_approve"
         case alwaysBlock = "always_block"
-        case mascot
     }
 
     init(from decoder: Decoder) throws {
@@ -122,36 +117,64 @@ struct GuardianConfig: Codable {
     }
 
     init(port: Int, timeoutSeconds: Int, autoApprove: [String], alwaysBlock: [String], mascot: String = "claude") {
-        self.port = port
-        self.timeoutSeconds = timeoutSeconds
-        self.autoApprove = autoApprove
-        self.alwaysBlock = alwaysBlock
-        self.mascot = mascot
+        self.port = port; self.timeoutSeconds = timeoutSeconds
+        self.autoApprove = autoApprove; self.alwaysBlock = alwaysBlock; self.mascot = mascot
     }
 }
 
-// MARK: - App State
+// MARK: - Per-Session State
 
 enum GuardianStatus {
-    case idle
-    case active
-    case pendingPermission
-    case justApproved   // transient state for thumbs-up animation
-    case justDenied     // transient state for sad animation
+    case idle, active, pendingPermission, justApproved, justDenied
 }
+
+class SessionState: ObservableObject, Identifiable {
+    let id: String          // session_id from Claude Code
+    let cwd: String         // working directory
+    let startedAt: Date
+
+    @Published var status: GuardianStatus = .idle
+    @Published var currentRequest: PermissionRequest?
+    @Published var countdown: Int = 300
+    @Published var showOverlay: Bool = false
+    @Published var mascotName: String
+
+    var countdownTimer: Timer?
+
+    init(id: String, cwd: String, timeout: Int, mascot: String) {
+        self.id = id
+        self.cwd = cwd
+        self.startedAt = Date()
+        self.countdown = timeout
+        self.mascotName = mascot
+    }
+
+    func cycleMascot() {
+        let names = allMascotNames
+        if let idx = names.firstIndex(of: mascotName) {
+            mascotName = names[(idx + 1) % names.count]
+        } else {
+            mascotName = names[0]
+        }
+    }
+
+    var shortId: String { String(id.prefix(8)) }
+    var shortCwd: String {
+        let parts = cwd.split(separator: "/")
+        return parts.last.map(String.init) ?? cwd
+    }
+}
+
+// MARK: - Global App State
 
 class AppState: ObservableObject {
     static let shared = AppState()
 
-    @Published var currentRequest: PermissionRequest?
-    @Published var status: GuardianStatus = .idle
+    @Published var sessions: [SessionState] = []
     @Published var history: [HistoryEntry] = []
-    @Published var countdown: Int = 300
-    @Published var showOverlay: Bool = false
 
     private var decisions: [String: (status: RequestStatus, message: String)] = [:]
     private let lock = NSLock()
-    private var countdownTimer: Timer?
     var config: GuardianConfig
 
     init() {
@@ -175,17 +198,55 @@ class AppState: ObservableObject {
         return "\(home)/Desktop/claude anime terminal notifs/claude-guardian/guardian.config.json"
     }
 
+    // MARK: Session lifecycle
+
+    func sessionStarted(sessionId: String, cwd: String) {
+        DispatchQueue.main.async {
+            guard !self.sessions.contains(where: { $0.id == sessionId }) else { return }
+            let session = SessionState(id: sessionId, cwd: cwd, timeout: self.config.timeoutSeconds, mascot: self.config.mascot)
+            self.sessions.append(session)
+        }
+    }
+
+    func sessionEnded(sessionId: String) {
+        DispatchQueue.main.async {
+            // If there's a pending request, auto-deny it
+            if let session = self.sessions.first(where: { $0.id == sessionId }),
+               let req = session.currentRequest {
+                self.lock.lock()
+                self.decisions[req.id] = (status: .denied, message: "Session ended")
+                self.lock.unlock()
+                session.countdownTimer?.invalidate()
+            }
+            self.sessions.removeAll { $0.id == sessionId }
+        }
+    }
+
+    func getOrCreateSession(sessionId: String) -> SessionState {
+        if let existing = sessions.first(where: { $0.id == sessionId }) {
+            return existing
+        }
+        let session = SessionState(id: sessionId, cwd: "", timeout: config.timeoutSeconds, mascot: config.mascot)
+        DispatchQueue.main.async {
+            self.sessions.append(session)
+        }
+        return session
+    }
+
+    // MARK: Permission flow
+
     func submitRequest(_ request: PermissionRequest) -> String {
         lock.lock()
         decisions[request.id] = (status: .pending, message: "")
         lock.unlock()
 
         DispatchQueue.main.async {
-            self.currentRequest = request
-            self.status = .pendingPermission
-            self.countdown = self.config.timeoutSeconds
-            self.showOverlay = true
-            self.startCountdown()
+            let session = self.getOrCreateSession(sessionId: request.sessionId)
+            session.currentRequest = request
+            session.status = .pendingPermission
+            session.countdown = self.config.timeoutSeconds
+            session.showOverlay = true
+            self.startCountdown(for: session)
         }
         return request.id
     }
@@ -196,81 +257,76 @@ class AppState: ObservableObject {
         return decisions[id]
     }
 
-    func approve() {
-        guard let req = currentRequest else { return }
+    func approve(session: SessionState) {
+        guard let req = session.currentRequest else { return }
         lock.lock()
         decisions[req.id] = (status: .approved, message: "")
         lock.unlock()
 
         history.insert(HistoryEntry(
             toolName: req.toolName, summary: toolSummary(req),
-            decision: .approved, timestamp: Date()
+            decision: .approved, sessionId: req.sessionId, timestamp: Date()
         ), at: 0)
         if history.count > 50 { history = Array(history.prefix(50)) }
 
-        stopCountdown()
-        showOverlay = false
-        currentRequest = nil
-        status = .justApproved
+        session.countdownTimer?.invalidate()
+        session.showOverlay = false
+        session.currentRequest = nil
+        session.status = .justApproved
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            if self.status == .justApproved { self.status = .idle }
+            if session.status == .justApproved { session.status = .idle }
         }
     }
 
-    func deny(message: String = "") {
-        guard let req = currentRequest else { return }
+    func deny(session: SessionState, message: String = "") {
+        guard let req = session.currentRequest else { return }
         lock.lock()
         decisions[req.id] = (status: .denied, message: message)
         lock.unlock()
 
         history.insert(HistoryEntry(
             toolName: req.toolName, summary: toolSummary(req),
-            decision: .denied, timestamp: Date()
+            decision: .denied, sessionId: req.sessionId, timestamp: Date()
         ), at: 0)
         if history.count > 50 { history = Array(history.prefix(50)) }
 
-        stopCountdown()
-        showOverlay = false
-        currentRequest = nil
-        status = .justDenied
+        session.countdownTimer?.invalidate()
+        session.showOverlay = false
+        session.currentRequest = nil
+        session.status = .justDenied
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-            if self.status == .justDenied { self.status = .idle }
+            if session.status == .justDenied { session.status = .idle }
         }
     }
 
-    private func startCountdown() {
-        countdownTimer?.invalidate()
-        countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            guard let self = self else { return }
+    private func startCountdown(for session: SessionState) {
+        session.countdownTimer?.invalidate()
+        session.countdownTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self, weak session] _ in
+            guard let self = self, let session = session else { return }
             DispatchQueue.main.async {
-                self.countdown -= 1
-                if self.countdown <= 0 { self.timeoutRequest() }
+                session.countdown -= 1
+                if session.countdown <= 0 { self.timeoutRequest(for: session) }
             }
         }
     }
 
-    private func stopCountdown() {
-        countdownTimer?.invalidate()
-        countdownTimer = nil
-    }
-
-    private func timeoutRequest() {
-        guard let req = currentRequest else { return }
+    private func timeoutRequest(for session: SessionState) {
+        guard let req = session.currentRequest else { return }
         lock.lock()
         decisions[req.id] = (status: .timeout, message: "Auto-denied: timeout")
         lock.unlock()
 
         history.insert(HistoryEntry(
             toolName: req.toolName, summary: toolSummary(req),
-            decision: .timeout, timestamp: Date()
+            decision: .timeout, sessionId: req.sessionId, timestamp: Date()
         ), at: 0)
 
-        stopCountdown()
-        showOverlay = false
-        currentRequest = nil
-        status = .idle
+        session.countdownTimer?.invalidate()
+        session.showOverlay = false
+        session.currentRequest = nil
+        session.status = .idle
     }
 
     private func toolSummary(_ req: PermissionRequest) -> String {
@@ -278,6 +334,15 @@ class AppState: ObservableObject {
         if let path = req.toolInput["file_path"]?.stringValue { return path }
         if let pattern = req.toolInput["pattern"]?.stringValue { return pattern }
         return req.toolName
+    }
+
+    // Aggregate status for menubar
+    var overallStatus: GuardianStatus {
+        if sessions.contains(where: { $0.status == .pendingPermission }) { return .pendingPermission }
+        if sessions.contains(where: { $0.status == .justApproved }) { return .justApproved }
+        if sessions.contains(where: { $0.status == .justDenied }) { return .justDenied }
+        if !sessions.isEmpty { return .active }
+        return .idle
     }
 }
 
@@ -372,6 +437,8 @@ class HTTPServer {
             sendResponse(connection: connection, status: 200, body: #"{"status":"ok"}"#)
         } else if method == "POST" && path == "/request" {
             handlePermissionRequest(rawRequest: rawRequest, connection: connection)
+        } else if method == "POST" && path == "/session" {
+            handleSessionEvent(rawRequest: rawRequest, connection: connection)
         } else if method == "GET" && path.hasPrefix("/decision/") {
             handleDecisionPoll(requestId: String(path.dropFirst("/decision/".count)), connection: connection)
         } else {
@@ -392,6 +459,31 @@ class HTTPServer {
         }
         let requestId = state.submitRequest(request)
         sendResponse(connection: connection, status: 200, body: "{\"request_id\":\"\(requestId)\",\"status\":\"pending\"}")
+    }
+
+    private func handleSessionEvent(rawRequest: String, connection: NWConnection) {
+        guard let bodyRange = rawRequest.range(of: "\r\n\r\n") else {
+            sendResponse(connection: connection, status: 400, body: #"{"error":"no body"}"#)
+            return
+        }
+        let bodyString = String(rawRequest[bodyRange.upperBound...])
+        guard let bodyData = bodyString.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: bodyData) as? [String: Any] else {
+            sendResponse(connection: connection, status: 400, body: #"{"error":"invalid json"}"#)
+            return
+        }
+
+        let event = json["event"] as? String ?? ""
+        let sessionId = json["session_id"] as? String ?? "unknown"
+        let cwd = json["cwd"] as? String ?? ""
+
+        if event == "SessionStart" {
+            state.sessionStarted(sessionId: sessionId, cwd: cwd)
+        } else if event == "SessionEnd" {
+            state.sessionEnded(sessionId: sessionId)
+        }
+
+        sendResponse(connection: connection, status: 200, body: #"{"status":"ok"}"#)
     }
 
     private func handleDecisionPoll(requestId: String, connection: NWConnection) {
@@ -425,11 +517,12 @@ let allMascotNames = ["claude", "cat", "owl", "skull", "dog", "dragon"]
 
 struct AnimatedMascot: View {
     let size: CGFloat
-    @ObservedObject var appState: AppState
+    let status: GuardianStatus
+    let mascotName: String
     @State private var frame: Int = 0
 
     private func sprites() -> (idle1: [[Int]], idle2: [[Int]], idle3: [[Int]], wave1: [[Int]], wave2: [[Int]], happy: [[Int]], sad1: [[Int]], sad2: [[Int]]) {
-        switch appState.config.mascot.lowercased() {
+        switch mascotName.lowercased() {
         case "cat": return (CatSprites.idle1, CatSprites.idle2, CatSprites.idle3, CatSprites.wave1, CatSprites.wave2, CatSprites.happy, CatSprites.sad1, CatSprites.sad2)
         case "owl": return (OwlSprites.idle1, OwlSprites.idle2, OwlSprites.idle3, OwlSprites.wave1, OwlSprites.wave2, OwlSprites.happy, OwlSprites.sad1, OwlSprites.sad2)
         case "skull": return (SkullSprites.idle1, SkullSprites.idle2, SkullSprites.idle3, SkullSprites.wave1, SkullSprites.wave2, SkullSprites.happy, SkullSprites.sad1, SkullSprites.sad2)
@@ -440,7 +533,7 @@ struct AnimatedMascot: View {
     }
 
     private func colorFor(_ v: Int) -> Color {
-        switch appState.config.mascot.lowercased() {
+        switch mascotName.lowercased() {
         case "cat": return CatSprites.color(for: v)
         case "owl": return OwlSprites.color(for: v)
         case "skull": return SkullSprites.color(for: v)
@@ -452,22 +545,16 @@ struct AnimatedMascot: View {
 
     private func currentSprite() -> [[Int]] {
         let s = sprites()
-        switch appState.status {
+        switch status {
         case .idle:
             let cycle = [0, 0, 2, 0, 0, 1]
             switch cycle[frame % cycle.count] {
-            case 1: return s.idle2
-            case 2: return s.idle3
-            default: return s.idle1
+            case 1: return s.idle2; case 2: return s.idle3; default: return s.idle1
             }
-        case .active:
-            return frame % 2 == 0 ? s.idle1 : s.idle3
-        case .pendingPermission:
-            return frame % 2 == 0 ? s.wave1 : s.wave2
-        case .justApproved:
-            return s.happy
-        case .justDenied:
-            return frame % 2 == 0 ? s.sad1 : s.sad2
+        case .active: return frame % 2 == 0 ? s.idle1 : s.idle3
+        case .pendingPermission: return frame % 2 == 0 ? s.wave1 : s.wave2
+        case .justApproved: return s.happy
+        case .justDenied: return frame % 2 == 0 ? s.sad1 : s.sad2
         }
     }
 
@@ -483,10 +570,8 @@ struct AnimatedMascot: View {
                     let value = sprite[row][col]
                     if value != 0 {
                         let rect = CGRect(
-                            x: CGFloat(col) * pixelSize,
-                            y: CGFloat(row) * pixelSize,
-                            width: pixelSize + 0.5,
-                            height: pixelSize + 0.5
+                            x: CGFloat(col) * pixelSize, y: CGFloat(row) * pixelSize,
+                            width: pixelSize + 0.5, height: pixelSize + 0.5
                         )
                         context.fill(Path(rect), with: .color(colorFor(value)))
                     }
@@ -504,171 +589,149 @@ struct AnimatedMascot: View {
     }
 }
 
-// MARK: - Unified Mascot + Permission Widget
 
-struct UnifiedWidgetView: View {
+// MARK: - Per-Session Widget
+
+struct SessionWidgetView: View {
+    @ObservedObject var session: SessionState
     @ObservedObject var appState: AppState
     @State private var denyMessage: String = ""
     @State private var showDenyField: Bool = false
 
     var body: some View {
         VStack(spacing: 0) {
-            // === Mascot section (always visible) ===
-            VStack(spacing: 4) {
-                AnimatedMascot(size: 64, appState: appState)
+            // === Mascot + session label ===
+            VStack(spacing: 3) {
+                AnimatedMascot(size: 52, status: session.status, mascotName: session.mascotName)
+                    .onTapGesture { session.cycleMascot() }
+                    .help("Click to change mascot")
+
+                // Session label
+                Text(session.shortCwd.isEmpty ? session.shortId : session.shortCwd)
+                    .font(.system(size: 7, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white.opacity(0.6))
+                    .lineLimit(1)
 
                 Text(statusLabel)
-                    .font(.system(size: 9, weight: .bold, design: .monospaced))
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
                     .foregroundColor(statusLabelColor)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
                     .background(Capsule().fill(statusLabelColor.opacity(0.15)))
             }
-            .padding(.top, 10)
-            .padding(.bottom, appState.showOverlay ? 8 : 10)
+            .padding(.top, 8)
+            .padding(.bottom, session.showOverlay ? 6 : 8)
             .frame(maxWidth: .infinity)
 
-            // === Permission panel (expands below mascot when needed) ===
-            if appState.showOverlay {
-                VStack(alignment: .leading, spacing: 10) {
-                    // Divider between mascot and panel
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(height: 1)
-                        .padding(.horizontal, 8)
+            // === Permission panel ===
+            if session.showOverlay {
+                VStack(alignment: .leading, spacing: 8) {
+                    Rectangle().fill(Color.gray.opacity(0.3)).frame(height: 1).padding(.horizontal, 8)
 
-                    // Countdown + title row
                     HStack {
                         Text("Permission Request")
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 10, weight: .semibold, design: .monospaced))
                             .foregroundColor(.gray)
-
                         Spacer()
-
                         ZStack {
+                            Circle().stroke(Color.gray.opacity(0.3), lineWidth: 2).frame(width: 26, height: 26)
                             Circle()
-                                .stroke(Color.gray.opacity(0.3), lineWidth: 2.5)
-                                .frame(width: 30, height: 30)
-                            Circle()
-                                .trim(from: 0, to: CGFloat(appState.countdown) / CGFloat(appState.config.timeoutSeconds))
-                                .stroke(countdownColor, lineWidth: 2.5)
-                                .frame(width: 30, height: 30)
+                                .trim(from: 0, to: CGFloat(session.countdown) / CGFloat(appState.config.timeoutSeconds))
+                                .stroke(countdownColor, lineWidth: 2)
+                                .frame(width: 26, height: 26)
                                 .rotationEffect(.degrees(-90))
-                                .animation(.linear(duration: 1), value: appState.countdown)
-                            Text("\(appState.countdown)")
-                                .font(.system(size: 10, weight: .bold, design: .monospaced))
+                                .animation(.linear(duration: 1), value: session.countdown)
+                            Text("\(session.countdown)")
+                                .font(.system(size: 8, weight: .bold, design: .monospaced))
                                 .foregroundColor(countdownColor)
                         }
                     }
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 10)
 
-                    if let req = appState.currentRequest {
-                        // Tool type
-                        HStack(spacing: 5) {
-                            Text(toolIcon(req.toolName)).font(.system(size: 14))
+                    if let req = session.currentRequest {
+                        HStack(spacing: 4) {
+                            Text(toolIcon(req.toolName)).font(.system(size: 12))
                             Text(toolDisplayName(req.toolName))
-                                .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                                 .foregroundColor(Color(red: 0.93, green: 0.45, blue: 0.32))
                         }
-                        .padding(.horizontal, 12)
+                        .padding(.horizontal, 10)
 
-                        // Content
                         let content = toolContent(req)
                         Text(content.isEmpty ? "(no content)" : content)
-                            .font(.system(size: 11, weight: .medium, design: .monospaced))
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
                             .foregroundColor(Color(red: 0.9, green: 0.95, blue: 1.0))
                             .textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(8)
+                            .padding(7)
                             .background(Color(red: 0.06, green: 0.06, blue: 0.09))
-                            .cornerRadius(6)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(Color.gray.opacity(0.2), lineWidth: 1)
-                            )
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 12)
-                    }
-
-                    // Deny message field
-                    if showDenyField {
-                        TextField("Message to Claude (optional)...", text: $denyMessage)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 10, design: .monospaced))
-                            .foregroundColor(.white)
-                            .padding(6)
-                            .background(Color.black.opacity(0.4))
                             .cornerRadius(5)
-                            .padding(.horizontal, 12)
+                            .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.gray.opacity(0.2), lineWidth: 1))
+                            .fixedSize(horizontal: false, vertical: true)
+                            .padding(.horizontal, 10)
                     }
 
-                    // Buttons
-                    HStack(spacing: 10) {
+                    if showDenyField {
+                        TextField("Message (optional)...", text: $denyMessage)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(5)
+                            .background(Color.black.opacity(0.4))
+                            .cornerRadius(4)
+                            .padding(.horizontal, 10)
+                    }
+
+                    HStack(spacing: 8) {
                         Button(action: {
                             if showDenyField {
-                                appState.deny(message: denyMessage)
-                                denyMessage = ""
-                                showDenyField = false
-                            } else {
-                                showDenyField = true
-                            }
+                                appState.deny(session: session, message: denyMessage)
+                                denyMessage = ""; showDenyField = false
+                            } else { showDenyField = true }
                         }) {
-                            HStack(spacing: 3) {
-                                Text("✕")
-                                Text(showDenyField ? "Send & Deny" : "Deny")
+                            HStack(spacing: 2) {
+                                Text("✕"); Text(showDenyField ? "Send & Deny" : "Deny")
                             }
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 7)
-                            .background(Color.red.opacity(0.7))
-                            .cornerRadius(7)
-                        }
-                        .buttonStyle(.plain)
-                        .keyboardShortcut(.escape, modifiers: [])
+                            .frame(maxWidth: .infinity).padding(.vertical, 6)
+                            .background(Color.red.opacity(0.7)).cornerRadius(6)
+                        }.buttonStyle(.plain)
 
                         Button(action: {
-                            appState.approve()
-                            showDenyField = false
-                            denyMessage = ""
+                            appState.approve(session: session)
+                            showDenyField = false; denyMessage = ""
                         }) {
-                            HStack(spacing: 3) {
-                                Text("✓")
-                                Text("Allow")
+                            HStack(spacing: 2) {
+                                Text("✓"); Text("Allow")
                             }
-                            .font(.system(size: 12, weight: .semibold, design: .monospaced))
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
                             .foregroundColor(.white)
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 7)
-                            .background(Color.green.opacity(0.7))
-                            .cornerRadius(7)
-                        }
-                        .buttonStyle(.plain)
-                        .keyboardShortcut(.return, modifiers: [])
+                            .frame(maxWidth: .infinity).padding(.vertical, 6)
+                            .background(Color.green.opacity(0.7)).cornerRadius(6)
+                        }.buttonStyle(.plain)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 12)
+                    .padding(.horizontal, 10)
+                    .padding(.bottom, 10)
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .frame(width: appState.showOverlay ? 340 : 95)
+        .frame(width: session.showOverlay ? 320 : 85)
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 10)
                 .fill(Color(red: 0.1, green: 0.1, blue: 0.12).opacity(0.92))
-                .shadow(color: .black.opacity(0.4), radius: 12, y: 6)
+                .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 10)
                 .stroke(statusBorderColor.opacity(0.4), lineWidth: 1)
         )
-        .animation(.easeInOut(duration: 0.3), value: appState.showOverlay)
+        .animation(.easeInOut(duration: 0.3), value: session.showOverlay)
     }
 
-    // MARK: - Helpers
-
     private var statusLabel: String {
-        switch appState.status {
+        switch session.status {
         case .idle: return "IDLE"
         case .active: return "WORKING"
         case .pendingPermission: return "NEEDS YOU"
@@ -676,55 +739,33 @@ struct UnifiedWidgetView: View {
         case .justDenied: return "DENIED"
         }
     }
-
     private var statusLabelColor: Color {
-        switch appState.status {
-        case .idle: return .green
-        case .active: return .orange
-        case .pendingPermission: return .red
-        case .justApproved: return .green
-        case .justDenied: return .red
+        switch session.status {
+        case .idle: return .green; case .active: return .orange
+        case .pendingPermission: return .red; case .justApproved: return .green; case .justDenied: return .red
         }
     }
-
     private var statusBorderColor: Color {
-        switch appState.status {
-        case .pendingPermission: return .red
-        case .justApproved: return .green
+        switch session.status {
+        case .pendingPermission: return .red; case .justApproved: return .green
         default: return Color(red: 0.93, green: 0.45, blue: 0.32)
         }
     }
-
     private var countdownColor: Color {
-        if appState.countdown > 30 { return .green }
-        if appState.countdown > 10 { return .yellow }
-        return .red
+        if session.countdown > 30 { return .green }; if session.countdown > 10 { return .yellow }; return .red
     }
-
     private func toolIcon(_ name: String) -> String {
         switch name {
-        case "Bash": return "⚡"
-        case "Write": return "📝"
-        case "Edit": return "✏️"
-        case "Read": return "📖"
-        case "Glob": return "🔍"
-        case "Grep": return "🔎"
-        default: return "🔧"
+        case "Bash": return "⚡"; case "Write": return "📝"; case "Edit": return "✏️"
+        case "Read": return "📖"; case "Glob": return "🔍"; case "Grep": return "🔎"; default: return "🔧"
         }
     }
-
     private func toolDisplayName(_ name: String) -> String {
         switch name {
-        case "Bash": return "Shell Command"
-        case "Write": return "Write File"
-        case "Edit": return "Edit File"
-        case "Read": return "Read File"
-        case "Glob": return "File Search"
-        case "Grep": return "Content Search"
-        default: return name
+        case "Bash": return "Shell Command"; case "Write": return "Write File"; case "Edit": return "Edit File"
+        case "Read": return "Read File"; case "Glob": return "File Search"; case "Grep": return "Content Search"; default: return name
         }
     }
-
     private func toolContent(_ req: PermissionRequest) -> String {
         if let cmd = req.toolInput["command"]?.stringValue { return "$ \(cmd)" }
         if let path = req.toolInput["file_path"]?.stringValue {
@@ -747,6 +788,9 @@ struct UnifiedWidgetView: View {
 }
 
 
+// (Each session gets its own NSWindow — no stacking container needed)
+
+
 // MARK: - History View (menubar popover)
 
 struct HistoryView: View {
@@ -756,17 +800,17 @@ struct HistoryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                AnimatedMascot(size: 32, appState: appState)
                 Text("Claude Guardian")
                     .font(.system(size: 13, weight: .bold, design: .monospaced))
                 Spacer()
-                Circle().fill(statusColor).frame(width: 8, height: 8)
+                Text("\(appState.sessions.count) session\(appState.sessions.count == 1 ? "" : "s")")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
             }
             .padding(.bottom, 4)
 
             Divider()
 
-            // Filter bar
             HStack(spacing: 4) {
                 Text("🔍").font(.system(size: 10))
                 TextField("Filter...", text: $filter)
@@ -782,20 +826,13 @@ struct HistoryView: View {
             .background(Color.gray.opacity(0.1))
             .cornerRadius(4)
 
-            // Stats bar
             HStack(spacing: 12) {
                 let approved = appState.history.filter { $0.decision == .approved }.count
                 let denied = appState.history.filter { $0.decision == .denied || $0.decision == .timeout }.count
-                Text("✓ \(approved)")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundColor(.green)
-                Text("✕ \(denied)")
-                    .font(.system(size: 10, weight: .bold, design: .monospaced))
-                    .foregroundColor(.red)
+                Text("✓ \(approved)").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundColor(.green)
+                Text("✕ \(denied)").font(.system(size: 10, weight: .bold, design: .monospaced)).foregroundColor(.red)
                 Spacer()
-                Text("\(appState.history.count) total")
-                    .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.secondary)
+                Text("\(appState.history.count) total").font(.system(size: 10, design: .monospaced)).foregroundColor(.secondary)
             }
 
             Divider()
@@ -853,16 +890,6 @@ struct HistoryView: View {
         }
     }
 
-    private var statusColor: Color {
-        switch appState.status {
-        case .idle: return .green
-        case .active: return .orange
-        case .pendingPermission: return .red
-        case .justApproved: return .green
-        case .justDenied: return .red
-        }
-    }
-
     private func timeAgo(_ date: Date) -> String {
         let seconds = Int(Date().timeIntervalSince(date))
         if seconds < 60 { return "\(seconds)s" }
@@ -877,31 +904,81 @@ struct HistoryView: View {
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
     var popover: NSPopover!
-    var widgetWindow: NSWindow!
     var server: HTTPServer!
     let appState = AppState.shared
     var statusAnimationTimer: Timer?
-    var lastOverlayState: Bool = false
+    var sessionWindows: [String: NSWindow] = [:]  // session_id -> window
+    var windowCounter: Int = 0
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
 
         setupMenubar()
-        setupWidgetWindow()
         startServer()
         startStatusAnimation()
 
-        // Poll for overlay state changes to bring window to front + activate keyboard
-        Timer.scheduledTimer(withTimeInterval: 0.15, repeats: true) { [weak self] _ in
+        // Poll for session changes: create/remove windows, activate when needed
+        Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
             guard let self = self else { return }
-            let showing = self.appState.showOverlay
-            if showing && !self.lastOverlayState {
-                // Just became visible — bring to front for keyboard shortcuts
-                self.widgetWindow.makeKeyAndOrderFront(nil)
+            self.syncSessionWindows()
+        }
+    }
+
+    private func syncSessionWindows() {
+        let currentIds = Set(appState.sessions.map { $0.id })
+        let windowIds = Set(sessionWindows.keys)
+
+        // Create windows for new sessions
+        for session in appState.sessions {
+            if !windowIds.contains(session.id) {
+                createWindowForSession(session)
+            }
+        }
+
+        // Remove windows for ended sessions
+        for id in windowIds {
+            if !currentIds.contains(id) {
+                sessionWindows[id]?.orderOut(nil)
+                sessionWindows.removeValue(forKey: id)
+            }
+        }
+
+        // Bring pending sessions to front
+        for session in appState.sessions {
+            if session.showOverlay, let window = sessionWindows[session.id] {
+                window.makeKeyAndOrderFront(nil)
                 NSApp.activate(ignoringOtherApps: true)
             }
-            self.lastOverlayState = showing
         }
+    }
+
+    private func createWindowForSession(_ session: SessionState) {
+        let widgetView = SessionWidgetView(session: session, appState: appState)
+        let hostingView = NSHostingView(rootView: widgetView)
+
+        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
+        // Offset each new window so they don't stack exactly on top of each other
+        let offset = CGFloat(windowCounter % 3) * 110
+        let widgetX = screenFrame.maxX - 110 - offset
+        let widgetY = screenFrame.minY + 20
+
+        let window = NSWindow(
+            contentRect: NSRect(x: widgetX, y: widgetY, width: 400, height: 600),
+            styleMask: [.borderless],
+            backing: .buffered,
+            defer: false
+        )
+        window.contentView = hostingView
+        window.isOpaque = false
+        window.backgroundColor = .clear
+        window.level = .screenSaver
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
+        window.isMovableByWindowBackground = true
+        window.hasShadow = false
+        window.orderFrontRegardless()
+
+        sessionWindows[session.id] = window
+        windowCounter += 1
     }
 
     private func setupMenubar() {
@@ -917,31 +994,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         popover.contentViewController = NSHostingController(rootView: HistoryView(appState: appState))
     }
 
-    private func setupWidgetWindow() {
-        let widgetView = UnifiedWidgetView(appState: appState)
-        let hostingView = NSHostingView(rootView: widgetView)
-
-        let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
-        // Start as small mascot in bottom-right
-        let widgetX = screenFrame.maxX - 110
-        let widgetY = screenFrame.minY + 20
-
-        widgetWindow = NSWindow(
-            contentRect: NSRect(x: widgetX, y: widgetY, width: 400, height: 600),
-            styleMask: [.borderless],
-            backing: .buffered,
-            defer: false
-        )
-        widgetWindow.contentView = hostingView
-        widgetWindow.isOpaque = false
-        widgetWindow.backgroundColor = .clear
-        widgetWindow.level = .screenSaver
-        widgetWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
-        widgetWindow.isMovableByWindowBackground = true
-        widgetWindow.hasShadow = false  // SwiftUI handles shadows
-        widgetWindow.orderFrontRegardless()
-    }
-
     private func startServer() {
         server = HTTPServer(port: UInt16(appState.config.port), state: appState)
         server.start()
@@ -950,17 +1002,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func startStatusAnimation() {
         statusAnimationTimer = Timer.scheduledTimer(withTimeInterval: 0.8, repeats: true) { [weak self] _ in
             guard let self = self, let button = self.statusItem.button else { return }
-            switch self.appState.status {
-            case .idle:
-                button.title = "🟢"
-            case .active:
-                button.title = button.title == "🟠" ? "🔶" : "🟠"
-            case .pendingPermission:
-                button.title = button.title == "🔴" ? "🔺" : "🔴"
-            case .justApproved:
-                button.title = "✅"
-            case .justDenied:
-                button.title = "❌"
+            let status = self.appState.overallStatus
+            switch status {
+            case .idle: button.title = "🟢"
+            case .active: button.title = button.title == "🟠" ? "🔶" : "🟠"
+            case .pendingPermission: button.title = button.title == "🔴" ? "🔺" : "🔴"
+            case .justApproved: button.title = "✅"
+            case .justDenied: button.title = "❌"
             }
         }
     }
