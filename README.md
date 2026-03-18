@@ -101,11 +101,18 @@ swiftc -o ClaudeGuardian Sources/main.swift Sources/sprites.swift \
 ### Menu Bar
 - Status icon in the macOS menu bar: 🟢 no sessions, 🟠 active, 🔴 needs attention, ✅ just approved, ❌ just denied
 - Click the icon to see:
-  - Active session count
+  - **Active sessions** with **Hide/Show** buttons — hide a mascot if you don't need it for that session
+  - Session cost and project name at a glance
   - Approve/deny stats
   - Searchable action history log (last 50 actions)
   - Filter bar to search by tool name or content
   - Quit button
+
+### Don't want the mascot for a session?
+1. Click the menubar icon (green/orange/red dot at the top of your screen)
+2. Find the session → click **Hide**
+3. That mascot disappears and the session falls back to normal Claude Code terminal permissions
+4. Click **Show** anytime to bring it back
 
 ### Fallback Behavior
 - If the Guardian app isn't running, the hook exits silently and Claude Code falls back to its own built-in permission prompts
@@ -218,6 +225,8 @@ rm -rf /path/to/claude-guardian
 | Click mascot | Jump to that session's terminal |
 | Long press mascot | Cycle to next mascot style |
 | Click `+` / `-` | Resize the widget (scales everything) |
+| Menubar → Hide | Dismiss mascot for that session (uses normal terminal flow) |
+| Menubar → Show | Bring the mascot back |
 
 ## Troubleshooting
 
