@@ -1023,9 +1023,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let currentIds = Set(appState.sessions.map { $0.id })
         let windowIds = Set(sessionWindows.keys)
 
-        // Create windows for new sessions
+        // Create windows for new sessions (skip hidden ones)
         for session in appState.sessions {
-            if !windowIds.contains(session.id) {
+            if !windowIds.contains(session.id) && !session.hidden {
                 createWindowForSession(session)
             }
         }
@@ -1042,11 +1042,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         for session in appState.sessions {
             guard let window = sessionWindows[session.id] else { continue }
 
-            // If hidden, stay hidden — don't un-hide for permission requests
-
             if session.hidden {
                 window.orderOut(nil)
-            } else if !window.isVisible {
+                continue  // skip everything else for hidden sessions
+            }
+
+            if !window.isVisible {
                 window.orderFrontRegardless()
             }
 
