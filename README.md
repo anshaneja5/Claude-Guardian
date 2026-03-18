@@ -68,9 +68,10 @@ swiftc -o ClaudeGuardian Sources/main.swift Sources/sprites.swift \
 - Permission requests are routed to the correct session's mascot
 - No sessions running = no mascots on screen (just the menubar icon)
 
-### Clickable Mascots
-- **Click any mascot to cycle through all 6 mascot styles**
-- Each session can have a different mascot — cat for your API project, dragon for your frontend
+### Mascot Interactions
+- **Click** a mascot to **jump to that session's terminal** — instantly focuses the right window
+- **Long press** (hold 0.5s) to **cycle through mascot styles** — each session can have a different mascot
+- **Resize** with the `+` / `-` buttons in the bottom-right corner — scales the entire widget (mascot, text, box)
 - The `mascot` field in config sets the default for new sessions
 
 ### Animated Pixel Art
@@ -80,6 +81,11 @@ swiftc -o ClaudeGuardian Sources/main.swift Sources/sprites.swift \
   - **Approved**: happy expression (^_^)
   - **Denied**: sad expression with droopy ears
 - Status label below each mascot: **IDLE**, **WORKING**, **NEEDS YOU**, **APPROVED!**, **DENIED**
+
+### Live Session Cost
+- Displays the running cost (USD) of each session right on the mascot widget
+- Updates automatically every time Claude uses a tool
+- Keeps you aware of spend without checking the terminal
 
 ### Permission Panel
 - Expands below the mascot when Claude needs approval
@@ -205,11 +211,13 @@ rm -rf /path/to/claude-guardian
 
 ## Keyboard Shortcuts
 
-| Key | Action |
-|-----|--------|
+| Action | What it does |
+|--------|-------------|
 | `Enter` / `Return` | Allow the pending action |
 | `Escape` | Deny (first press reveals message field, second press sends) |
-| Click mascot | Cycle to next mascot style |
+| Click mascot | Jump to that session's terminal |
+| Long press mascot | Cycle to next mascot style |
+| Click `+` / `-` | Resize the widget (scales everything) |
 
 ## Troubleshooting
 

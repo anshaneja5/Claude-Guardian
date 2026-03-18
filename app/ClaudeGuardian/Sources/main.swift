@@ -141,6 +141,7 @@ class SessionState: ObservableObject, Identifiable {
     @Published var costUsd: Double = 0.0
     @Published var terminalPid: Int = 0      // PID of the terminal app
     @Published var terminalApp: String = ""   // e.g. "Terminal", "iTerm2", "Ghostty"
+    @Published var widgetScale: CGFloat = 1.0 // 0.6 to 2.0
 
     var countdownTimer: Timer?
 
@@ -624,6 +625,10 @@ struct AnimatedMascot: View {
 
 // MARK: - Per-Session Widget
 
+// MARK: - Scale Buttons (+/- to resize)
+
+// MARK: - Per-Session Widget
+
 struct SessionWidgetView: View {
     @ObservedObject var session: SessionState
     @ObservedObject var appState: AppState
@@ -633,8 +638,8 @@ struct SessionWidgetView: View {
     var body: some View {
         VStack(spacing: 0) {
             // === Mascot + session label ===
-            VStack(spacing: 3) {
-                AnimatedMascot(size: 52, status: session.status, mascotName: session.mascotName)
+            VStack(spacing: 3 * session.widgetScale) {
+                AnimatedMascot(size: 52 * session.widgetScale, status: session.status, mascotName: session.mascotName)
                     .onTapGesture { session.focusTerminal() }
                     .onLongPressGesture(minimumDuration: 0.5) { session.cycleMascot() }
                     .help("Click: jump to terminal | Hold: change mascot")
@@ -642,26 +647,26 @@ struct SessionWidgetView: View {
                 // Session label
                 HStack(spacing: 3) {
                     Text(session.shortCwd.isEmpty ? session.shortId : session.shortCwd)
-                        .font(.system(size: 7, weight: .medium, design: .monospaced))
+                        .font(.system(size: 7 * session.widgetScale, weight: .medium, design: .monospaced))
                         .foregroundColor(.white.opacity(0.6))
                         .lineLimit(1)
 
                     if !session.costDisplay.isEmpty {
                         Text(session.costDisplay)
-                            .font(.system(size: 7, weight: .bold, design: .monospaced))
+                            .font(.system(size: 7 * session.widgetScale, weight: .bold, design: .monospaced))
                             .foregroundColor(.white.opacity(0.35))
                     }
                 }
 
                 Text(statusLabel)
-                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .font(.system(size: 8 * session.widgetScale, weight: .bold, design: .monospaced))
                     .foregroundColor(statusLabelColor)
-                    .padding(.horizontal, 5)
+                    .padding(.horizontal, 5 * session.widgetScale)
                     .padding(.vertical, 1)
                     .background(Capsule().fill(statusLabelColor.opacity(0.15)))
             }
-            .padding(.top, 8)
-            .padding(.bottom, session.showOverlay ? 6 : 8)
+            .padding(.top, 8 * session.widgetScale)
+            .padding(.bottom, session.showOverlay ? 6 * session.widgetScale : 8 * session.widgetScale)
             .frame(maxWidth: .infinity)
 
             // === Permission panel ===
@@ -758,17 +763,42 @@ struct SessionWidgetView: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .frame(width: session.showOverlay ? 320 : 85)
+        .frame(width: (session.showOverlay ? 320 : 85) * session.widgetScale)
         .background(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 10 * session.widgetScale)
                 .fill(Color(red: 0.1, green: 0.1, blue: 0.12).opacity(0.92))
                 .shadow(color: .black.opacity(0.35), radius: 10, y: 4)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 10)
+            RoundedRectangle(cornerRadius: 10 * session.widgetScale)
                 .stroke(statusBorderColor.opacity(0.4), lineWidth: 1)
         )
+        .overlay(alignment: .bottomTrailing) {
+            HStack(spacing: 0) {
+                Button(action: {
+                    session.widgetScale = max(0.6, session.widgetScale - 0.15)
+                }) {
+                    Text("\u{2212}")
+                        .font(.system(size: 8 * session.widgetScale, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.4))
+                        .frame(width: 12 * session.widgetScale, height: 12 * session.widgetScale)
+                }
+                .buttonStyle(.plain)
+
+                Button(action: {
+                    session.widgetScale = min(2.0, session.widgetScale + 0.15)
+                }) {
+                    Text("+")
+                        .font(.system(size: 8 * session.widgetScale, weight: .bold, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.4))
+                        .frame(width: 12 * session.widgetScale, height: 12 * session.widgetScale)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(2 * session.widgetScale)
+        }
         .animation(.easeInOut(duration: 0.3), value: session.showOverlay)
+        .animation(.easeOut(duration: 0.15), value: session.widgetScale)
     }
 
     private var statusLabel: String {
