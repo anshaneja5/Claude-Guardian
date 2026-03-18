@@ -192,6 +192,7 @@ class AppState: ObservableObject {
     @Published var history: [HistoryEntry] = []
 
     private var decisions: [String: (status: RequestStatus, message: String)] = [:]
+    private var hiddenSessionIds: Set<String> = []  // thread-safe via lock
     private let lock = NSLock()
     var config: GuardianConfig
 
@@ -237,6 +238,9 @@ class AppState: ObservableObject {
                 session.countdownTimer?.invalidate()
             }
             self.sessions.removeAll { $0.id == sessionId }
+            self.lock.lock()
+            self.hiddenSessionIds.remove(sessionId)
+            self.lock.unlock()
         }
     }
 
@@ -253,10 +257,21 @@ class AppState: ObservableObject {
 
     // MARK: Permission flow
 
+    func hideSession(_ sessionId: String) {
+        lock.lock()
+        hiddenSessionIds.insert(sessionId)
+        lock.unlock()
+        print("SESSION HIDDEN: \(sessionId) — hiddenIds now: \(hiddenSessionIds)")
+    }
+
     func submitRequest(_ request: PermissionRequest) -> String {
+        lock.lock()
+        let isHidden = hiddenSessionIds.contains(request.sessionId)
+        lock.unlock()
+
+        print("SUBMIT REQUEST for session \(request.sessionId) — isHidden=\(isHidden)")
         // If session is hidden, auto-approve so hook doesn't hang
-        // (Claude Code's own permission system will still apply)
-        if let session = sessions.first(where: { $0.id == request.sessionId }), session.hidden {
+        if isHidden {
             lock.lock()
             decisions[request.id] = (status: .approved, message: "")
             lock.unlock()
@@ -635,6 +650,13 @@ struct AnimatedMascot: View {
 
 // MARK: - Per-Session Widget
 
+// MARK: - Draggable Window (custom NSWindow that allows buttons to work)
+
+class DraggablePanel: NSPanel {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
 // MARK: - Scale Buttons (+/- to resize)
 
 // MARK: - Per-Session Widget
@@ -647,20 +669,6 @@ struct SessionWidgetView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // === Close button (top-right) ===
-            HStack {
-                Spacer()
-                Button(action: { session.hidden = true }) {
-                    Text("\u{2715}")
-                        .font(.system(size: 8 * session.widgetScale, weight: .bold))
-                        .foregroundColor(.white.opacity(0.3))
-                        .frame(width: 12 * session.widgetScale, height: 12 * session.widgetScale)
-                }
-                .buttonStyle(.plain)
-                .padding(.top, 3 * session.widgetScale)
-                .padding(.trailing, 4 * session.widgetScale)
-            }
-
             // === Mascot + session label ===
             VStack(spacing: 3 * session.widgetScale) {
                 AnimatedMascot(size: 52 * session.widgetScale, status: session.status, mascotName: session.mascotName)
@@ -904,6 +912,39 @@ struct HistoryView: View {
             }
             .padding(.bottom, 4)
 
+            // Active sessions with hide buttons
+            if !appState.sessions.isEmpty {
+                ForEach(appState.sessions) { session in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(session.hidden ? Color.gray : Color.green)
+                            .frame(width: 6, height: 6)
+                        Text(session.shortCwd.isEmpty ? session.shortId : session.shortCwd)
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .lineLimit(1)
+                        if !session.costDisplay.isEmpty {
+                            Text(session.costDisplay)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                        Button(action: {
+                            if session.hidden {
+                                session.hidden = false
+                            } else {
+                                session.hidden = true
+                                appState.hideSession(session.id)
+                            }
+                        }) {
+                            Text(session.hidden ? "Show" : "Hide")
+                                .font(.system(size: 9, weight: .medium, design: .monospaced))
+                                .foregroundColor(session.hidden ? .green : .orange)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+
             Divider()
 
             HStack(spacing: 4) {
@@ -1068,9 +1109,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let widgetX = screenFrame.maxX - 110 - offset
         let widgetY = screenFrame.minY + 20
 
-        let window = NSWindow(
+        let window = DraggablePanel(
             contentRect: NSRect(x: widgetX, y: widgetY, width: 400, height: 600),
-            styleMask: [.borderless],
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
