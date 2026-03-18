@@ -10,7 +10,7 @@
 
 ---
 
-Each terminal session gets its own mascot — run 3 projects at once and you'll see 3 independent mascots on screen, each handling their own permission requests.
+Each terminal session gets its own mascot — every active session spawns an independent mascot on screen, handling its own permission requests.
 
 ## How It Works
 
