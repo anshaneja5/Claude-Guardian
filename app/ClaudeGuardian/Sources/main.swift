@@ -138,6 +138,9 @@ class SessionState: ObservableObject, Identifiable {
     @Published var countdown: Int = 300
     @Published var showOverlay: Bool = false
     @Published var mascotName: String
+    @Published var costUsd: Double = 0.0
+    @Published var terminalPid: Int = 0      // PID of the terminal app
+    @Published var terminalApp: String = ""   // e.g. "Terminal", "iTerm2", "Ghostty"
 
     var countdownTimer: Timer?
 
@@ -156,6 +159,19 @@ class SessionState: ObservableObject, Identifiable {
         } else {
             mascotName = names[0]
         }
+    }
+
+    func focusTerminal() {
+        guard terminalPid > 0 else { return }
+        if let app = NSRunningApplication(processIdentifier: pid_t(terminalPid)) {
+            app.activate()
+        }
+    }
+
+    var costDisplay: String {
+        if costUsd < 0.001 { return "" }
+        if costUsd < 0.01 { return String(format: "$%.3f", costUsd) }
+        return String(format: "$%.2f", costUsd)
     }
 
     var shortId: String { String(id.prefix(8)) }
@@ -476,11 +492,27 @@ class HTTPServer {
         let event = json["event"] as? String ?? ""
         let sessionId = json["session_id"] as? String ?? "unknown"
         let cwd = json["cwd"] as? String ?? ""
+        let terminalPid = json["terminal_pid"] as? Int ?? 0
+        let terminalApp = json["terminal_app"] as? String ?? ""
 
         if event == "SessionStart" {
             state.sessionStarted(sessionId: sessionId, cwd: cwd)
+            // Update terminal info
+            DispatchQueue.main.async {
+                if let session = self.state.sessions.first(where: { $0.id == sessionId }) {
+                    session.terminalPid = terminalPid
+                    session.terminalApp = terminalApp
+                }
+            }
         } else if event == "SessionEnd" {
             state.sessionEnded(sessionId: sessionId)
+        } else if event == "CostUpdate" {
+            let costUsd = json["cost_usd"] as? Double ?? 0
+            DispatchQueue.main.async {
+                if let session = self.state.sessions.first(where: { $0.id == sessionId }) {
+                    session.costUsd = costUsd
+                }
+            }
         }
 
         sendResponse(connection: connection, status: 200, body: #"{"status":"ok"}"#)
@@ -603,14 +635,23 @@ struct SessionWidgetView: View {
             // === Mascot + session label ===
             VStack(spacing: 3) {
                 AnimatedMascot(size: 52, status: session.status, mascotName: session.mascotName)
-                    .onTapGesture { session.cycleMascot() }
-                    .help("Click to change mascot")
+                    .onTapGesture { session.focusTerminal() }
+                    .onLongPressGesture(minimumDuration: 0.5) { session.cycleMascot() }
+                    .help("Click: jump to terminal | Hold: change mascot")
 
                 // Session label
-                Text(session.shortCwd.isEmpty ? session.shortId : session.shortCwd)
-                    .font(.system(size: 7, weight: .medium, design: .monospaced))
-                    .foregroundColor(.white.opacity(0.6))
-                    .lineLimit(1)
+                HStack(spacing: 3) {
+                    Text(session.shortCwd.isEmpty ? session.shortId : session.shortCwd)
+                        .font(.system(size: 7, weight: .medium, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.6))
+                        .lineLimit(1)
+
+                    if !session.costDisplay.isEmpty {
+                        Text(session.costDisplay)
+                            .font(.system(size: 7, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.35))
+                    }
+                }
 
                 Text(statusLabel)
                     .font(.system(size: 8, weight: .bold, design: .monospaced))
