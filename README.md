@@ -82,6 +82,20 @@ swiftc -o ClaudeGuardian Sources/main.swift Sources/sprites.swift \
   - **Denied**: sad expression with droopy ears
 - Status label below each mascot: **IDLE**, **WORKING**, **NEEDS YOU**, **APPROVED!**, **DENIED**
 
+### Sound Effects
+- **Permission needed** → submarine alert sound so you never miss it
+- **Approved** → pop sound
+- **Denied** → basso sound
+- **Timeout** → sosumi sound
+- **Notification** → blow sound
+- All using macOS built-in system sounds — no extra files needed
+
+### Notification Bubbles
+- Claude's notifications appear as **speech bubbles** above the mascot
+- Shows messages like "Task completed", errors, or status updates
+- Auto-dismisses after 5 seconds, or tap to dismiss immediately
+- Widget expands to fit the message text
+
 ### Live Session Cost
 - Displays the running cost (USD) of each session right on the mascot widget
 - Updates automatically every time Claude uses a tool
@@ -157,8 +171,10 @@ Set `"mascot"` in config for the default, or **click any mascot on screen** to c
 | Hook | Script | Purpose |
 |------|--------|---------|
 | `PreToolUse` | `hook/pre_tool_use.py` | Intercepts tool calls, blocks until user approves/denies |
+| `PermissionRequest` | `hook/permission_request.py` | Intercepts built-in "Yes/No" permission prompts |
 | `SessionStart` | `hook/session_lifecycle.py` | Notifies Guardian to spawn a mascot |
 | `SessionEnd` | `hook/session_lifecycle.py` | Notifies Guardian to remove the mascot |
+| `Notification` | `hook/notification.py` | Forwards notifications as speech bubbles on mascot |
 
 ### Swift App (`app/ClaudeGuardian/Sources/`)
 - **`main.swift`**: App delegate with per-session window management, HTTP server (NWListener), SwiftUI views, menubar
@@ -175,7 +191,9 @@ claude-guardian/
 ├── guardian.config.json                   # Runtime config (port, timeout, mascot, rules)
 ├── hook/
 │   ├── pre_tool_use.py                   # PreToolUse hook (blocks until decision)
-│   └── session_lifecycle.py              # SessionStart/SessionEnd hook (fire-and-forget)
+│   ├── permission_request.py             # PermissionRequest hook (built-in Yes/No prompts)
+│   ├── session_lifecycle.py              # SessionStart/SessionEnd hook (fire-and-forget)
+│   └── notification.py                   # Notification hook (speech bubbles)
 ├── app/
 │   └── ClaudeGuardian/
 │       └── Sources/
