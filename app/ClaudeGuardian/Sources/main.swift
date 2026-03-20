@@ -143,6 +143,8 @@ class SessionState: ObservableObject, Identifiable {
     @Published var terminalPid: Int = 0      // PID of the terminal app
     @Published var terminalApp: String = ""   // e.g. "Terminal", "iTerm2", "Ghostty"
     @Published var widgetScale: CGFloat = 1.0 // 0.6 to 2.0
+    @Published var notification: String = ""  // speech bubble text
+    @Published var showNotification: Bool = false
 
     var countdownTimer: Timer?
 
@@ -184,6 +186,14 @@ class SessionState: ObservableObject, Identifiable {
 }
 
 // MARK: - Global App State
+
+// MARK: - Sound Effects
+
+func playSound(_ name: String) {
+    if let sound = NSSound(named: NSSound.Name(name)) {
+        sound.play()
+    }
+}
 
 class AppState: ObservableObject {
     static let shared = AppState()
@@ -283,6 +293,7 @@ class AppState: ObservableObject {
         lock.unlock()
 
         DispatchQueue.main.async {
+            playSound("Submarine")  // alert sound when permission needed
             let session = self.getOrCreateSession(sessionId: request.sessionId)
             session.currentRequest = request
             session.status = .pendingPermission
@@ -301,6 +312,7 @@ class AppState: ObservableObject {
 
     func approve(session: SessionState) {
         guard let req = session.currentRequest else { return }
+        playSound("Pop")  // approve sound
         lock.lock()
         decisions[req.id] = (status: .approved, message: "")
         lock.unlock()
@@ -323,6 +335,7 @@ class AppState: ObservableObject {
 
     func deny(session: SessionState, message: String = "") {
         guard let req = session.currentRequest else { return }
+        playSound("Basso")  // deny sound
         lock.lock()
         decisions[req.id] = (status: .denied, message: message)
         lock.unlock()
@@ -356,6 +369,7 @@ class AppState: ObservableObject {
 
     private func timeoutRequest(for session: SessionState) {
         guard let req = session.currentRequest else { return }
+        playSound("Sosumi")  // timeout sound
         lock.lock()
         decisions[req.id] = (status: .timeout, message: "Auto-denied: timeout")
         lock.unlock()
@@ -376,6 +390,20 @@ class AppState: ObservableObject {
         if let path = req.toolInput["file_path"]?.stringValue { return path }
         if let pattern = req.toolInput["pattern"]?.stringValue { return pattern }
         return req.toolName
+    }
+
+    func showNotification(sessionId: String, message: String) {
+        DispatchQueue.main.async {
+            if let session = self.sessions.first(where: { $0.id == sessionId }) {
+                session.notification = message
+                session.showNotification = true
+                playSound("Blow")  // notification sound
+                // Auto-dismiss after 5 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                    session.showNotification = false
+                }
+            }
+        }
     }
 
     // Aggregate status for menubar
@@ -532,6 +560,11 @@ class HTTPServer {
             }
         } else if event == "SessionEnd" {
             state.sessionEnded(sessionId: sessionId)
+        } else if event == "Notification" {
+            let message = json["message"] as? String ?? ""
+            if !message.isEmpty {
+                state.showNotification(sessionId: sessionId, message: message)
+            }
         } else if event == "CostUpdate" {
             let costUsd = json["cost_usd"] as? Double ?? 0
             DispatchQueue.main.async {
@@ -669,6 +702,28 @@ struct SessionWidgetView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            // === Notification speech bubble ===
+            if session.showNotification {
+                Text(session.notification)
+                    .font(.system(size: 9 * session.widgetScale, weight: .medium, design: .monospaced))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 8 * session.widgetScale)
+                    .padding(.vertical, 5 * session.widgetScale)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8 * session.widgetScale)
+                            .fill(Color(red: 0.18, green: 0.18, blue: 0.22))
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8 * session.widgetScale)
+                            .stroke(Color.white.opacity(0.15), lineWidth: 1)
+                    )
+                    .padding(.horizontal, 6 * session.widgetScale)
+                    .padding(.top, 4 * session.widgetScale)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .transition(.opacity.combined(with: .scale))
+                    .onTapGesture { session.showNotification = false }
+            }
+
             // === Mascot + session label ===
             VStack(spacing: 3 * session.widgetScale) {
                 AnimatedMascot(size: 52 * session.widgetScale, status: session.status, mascotName: session.mascotName)
@@ -795,7 +850,7 @@ struct SessionWidgetView: View {
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .frame(width: (session.showOverlay ? 320 : 85) * session.widgetScale)
+        .frame(width: ((session.showOverlay || session.showNotification) ? 280 : 85) * session.widgetScale)
         .background(
             RoundedRectangle(cornerRadius: 10 * session.widgetScale)
                 .fill(Color(red: 0.1, green: 0.1, blue: 0.12).opacity(0.92))
@@ -830,6 +885,7 @@ struct SessionWidgetView: View {
             .padding(2 * session.widgetScale)
         }
         .animation(.easeInOut(duration: 0.3), value: session.showOverlay)
+        .animation(.easeInOut(duration: 0.3), value: session.showNotification)
         .animation(.easeOut(duration: 0.15), value: session.widgetScale)
     }
 

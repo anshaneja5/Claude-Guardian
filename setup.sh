@@ -6,6 +6,7 @@ APP_DIR="$SCRIPT_DIR/app/ClaudeGuardian"
 HOOK_SCRIPT="$SCRIPT_DIR/hook/pre_tool_use.py"
 LIFECYCLE_SCRIPT="$SCRIPT_DIR/hook/session_lifecycle.py"
 PERMISSION_SCRIPT="$SCRIPT_DIR/hook/permission_request.py"
+NOTIFICATION_SCRIPT="$SCRIPT_DIR/hook/notification.py"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 BINARY_PATH="$APP_DIR/ClaudeGuardian"
 PLIST_NAME="com.claudeguardian.app"
@@ -84,7 +85,19 @@ perm_entry = {
 
 settings['hooks']['SessionStart'] = [lifecycle_entry]
 settings['hooks']['SessionEnd'] = [lifecycle_entry]
+notif_script = '$NOTIFICATION_SCRIPT'
+
+notif_entry = {
+    'matcher': '',
+    'hooks': [{
+        'type': 'command',
+        'command': f\"python3 '{notif_script}'\",
+        'timeout': 5
+    }]
+}
+
 settings['hooks']['PermissionRequest'] = [perm_entry]
+settings['hooks']['Notification'] = [notif_entry]
 
 with open(settings_path, 'w') as f:
     json.dump(settings, f, indent=2)
