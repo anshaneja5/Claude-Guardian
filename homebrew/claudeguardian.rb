@@ -1,0 +1,27 @@
+cask "claudeguardian" do
+  version "1.0.0"
+  sha256 "REPLACE_WITH_ACTUAL_SHA256"
+
+  url "https://github.com/anshaneja5/Claude-Guardian/releases/download/v#{version}/ClaudeGuardian.zip"
+  name "Claude Guardian"
+  desc "Floating pixel-art mascot for Claude Code permissions"
+  homepage "https://github.com/anshaneja5/Claude-Guardian"
+
+  depends_on macos: ">= :ventura"
+
+  app "ClaudeGuardian.app"
+
+  postflight do
+    system_command "#{appdir}/ClaudeGuardian.app/Contents/Resources/post-install.sh"
+  end
+
+  uninstall launchctl: "com.claudeguardian.app",
+            quit:      "com.claudeguardian.app"
+
+  zap trash: [
+    "~/.config/claude-guardian",
+    "~/Library/LaunchAgents/com.claudeguardian.app.plist",
+    "/tmp/claude-guardian.log",
+    "/tmp/claude-guardian.err",
+  ]
+end

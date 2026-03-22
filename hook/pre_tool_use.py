@@ -12,18 +12,39 @@ import urllib.request
 import urllib.error
 import time
 
-GUARDIAN_PORT = 9001
-GUARDIAN_URL = f"http://localhost:{GUARDIAN_PORT}"
-CONFIG_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "guardian.config.json")
 POLL_INTERVAL = 0.5  # seconds between polls
 
 
+def _find_config_path():
+    """Find guardian.config.json: user override > bundled default."""
+    user_config = os.path.expanduser("~/.config/claude-guardian/guardian.config.json")
+    if os.path.isfile(user_config):
+        return user_config
+    # Bundled: script is in hook/ dir, config is sibling to hook/
+    bundled = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "guardian.config.json")
+    if os.path.isfile(bundled):
+        return bundled
+    return None
+
+
 def load_config():
+    config_path = _find_config_path()
+    if not config_path:
+        return {"auto_approve": [], "always_block": [], "timeout_seconds": 60}
     try:
-        with open(CONFIG_PATH, "r") as f:
+        with open(config_path, "r") as f:
             return json.load(f)
     except (FileNotFoundError, json.JSONDecodeError):
         return {"auto_approve": [], "always_block": [], "timeout_seconds": 60}
+
+
+def _get_guardian_url():
+    config = load_config()
+    port = config.get("port", 9001)
+    return f"http://localhost:{port}"
+
+
+GUARDIAN_URL = _get_guardian_url()
 
 
 def check_server():

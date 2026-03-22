@@ -1,0 +1,49 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build .app bundle
+        run: ./build-app.sh
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute SHA256
+        id: sha
+        run: |
+          SHA=$(shasum -a 256 build/ClaudeGuardian.zip | cut -d' ' -f1)
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "SHA256: $SHA"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/ClaudeGuardian.zip
+          body: |
+            ## Claude Guardian v${{ steps.version.outputs.version }}
+
+            ### Install via Homebrew
+            ```bash
+            brew tap anshaneja5/tap
+            brew install --cask claudeguardian
+            ```
+
+            ### Manual install
+            1. Download `ClaudeGuardian.zip` below
+            2. Unzip and move `ClaudeGuardian.app` to `/Applications/`
+            3. Run: `/Applications/ClaudeGuardian.app/Contents/Resources/post-install.sh`
+
+            ---
+            **SHA256:** `${{ steps.sha.outputs.sha256 }}`
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

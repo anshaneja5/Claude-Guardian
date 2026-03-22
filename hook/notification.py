@@ -8,8 +8,32 @@ import sys
 import json
 import urllib.request
 
-GUARDIAN_PORT = 9001
-GUARDIAN_URL = f"http://localhost:{GUARDIAN_PORT}"
+import os
+
+
+def _find_config_path():
+    user_config = os.path.expanduser("~/.config/claude-guardian/guardian.config.json")
+    if os.path.isfile(user_config):
+        return user_config
+    bundled = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "guardian.config.json")
+    if os.path.isfile(bundled):
+        return bundled
+    return None
+
+
+def _get_guardian_url():
+    config_path = _find_config_path()
+    port = 9001
+    if config_path:
+        try:
+            with open(config_path, "r") as f:
+                port = json.load(f).get("port", 9001)
+        except Exception:
+            pass
+    return f"http://localhost:{port}"
+
+
+GUARDIAN_URL = _get_guardian_url()
 
 
 def main():

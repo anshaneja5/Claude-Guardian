@@ -34,17 +34,31 @@ flowchart LR
     style I fill:#f87171,color:#fff
 ```
 
-## Quick Start
+## Install
+
+### Homebrew (recommended)
 
 ```bash
+brew tap anshaneja5/tap
+brew install --cask claudeguardian
+```
+
+This installs the app to `/Applications/`, sets up Claude Code hooks, copies the default config to `~/.config/claude-guardian/`, and launches Guardian automatically.
+
+### From Source
+
+```bash
+git clone https://github.com/anshaneja5/Claude-Guardian.git
+cd Claude-Guardian
 ./setup.sh
 ```
 
 This will:
-1. Compile the Swift app
-2. Install `PreToolUse`, `SessionStart`, and `SessionEnd` hooks into `~/.claude/settings.json`
-3. Create a LaunchAgent so Guardian starts on login
-4. Launch the app
+1. Build the `.app` bundle
+2. Install `PreToolUse`, `SessionStart`, `SessionEnd`, `PermissionRequest`, and `Notification` hooks into `~/.claude/settings.json`
+3. Copy the default config to `~/.config/claude-guardian/guardian.config.json`
+4. Create a LaunchAgent so Guardian starts on login
+5. Launch the app
 
 ### Manual Start
 
@@ -134,7 +148,7 @@ swiftc -o ClaudeGuardian Sources/main.swift Sources/sprites.swift \
 
 ## Configuration
 
-Edit `guardian.config.json`:
+Edit `~/.config/claude-guardian/guardian.config.json` (created during setup):
 
 ```json
 {
@@ -187,8 +201,10 @@ Set `"mascot"` in config for the default, or **click any mascot on screen** to c
 
 ```
 claude-guardian/
-├── setup.sh                              # One-command install + build + launch
-├── guardian.config.json                   # Runtime config (port, timeout, mascot, rules)
+├── setup.sh                              # One-command install (build + post-install)
+├── build-app.sh                          # Builds ClaudeGuardian.app bundle + zip
+├── post-install.sh                       # Installs hooks, config, launch agent
+├── guardian.config.json                   # Default config (port, timeout, mascot, rules)
 ├── hook/
 │   ├── pre_tool_use.py                   # PreToolUse hook (blocks until decision)
 │   ├── permission_request.py             # PermissionRequest hook (built-in Yes/No prompts)
@@ -196,9 +212,15 @@ claude-guardian/
 │   └── notification.py                   # Notification hook (speech bubbles)
 ├── app/
 │   └── ClaudeGuardian/
+│       ├── Info.plist                    # macOS app bundle metadata
 │       └── Sources/
 │           ├── main.swift                # App, HTTP server, per-session windows, UI
 │           └── sprites.swift             # Pixel art mascot sprite data
+├── homebrew/
+│   └── claudeguardian.rb                 # Homebrew cask formula
+├── .github/
+│   └── workflows/
+│       └── release.yml                   # CI: build + GitHub release on tag push
 ├── assets/                               # Generated mascot preview images
 │   ├── claude.png
 │   ├── cat.png
@@ -219,6 +241,15 @@ claude-guardian/
 
 ## Uninstall
 
+### If installed via Homebrew
+
+```bash
+brew uninstall --cask claudeguardian
+# Then edit ~/.claude/settings.json and remove the Guardian hook entries
+```
+
+### If installed from source
+
 ```bash
 # 1. Stop the running app
 pkill -f ClaudeGuardian
@@ -228,9 +259,11 @@ launchctl unload ~/Library/LaunchAgents/com.claudeguardian.app.plist
 rm ~/Library/LaunchAgents/com.claudeguardian.app.plist
 
 # 3. Remove hooks from Claude Code settings
-# Edit ~/.claude/settings.json and delete PreToolUse, SessionStart, SessionEnd entries
+# Edit ~/.claude/settings.json and delete PreToolUse, SessionStart, SessionEnd,
+# PermissionRequest, and Notification hook entries
 
-# 4. Delete the project folder
+# 4. Remove config and project folder
+rm -rf ~/.config/claude-guardian
 rm -rf /path/to/claude-guardian
 ```
 
