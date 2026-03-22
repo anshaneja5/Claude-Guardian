@@ -183,6 +183,12 @@ class SessionState: ObservableObject, Identifiable {
         let parts = cwd.split(separator: "/")
         return parts.last.map(String.init) ?? cwd
     }
+    var elapsedDisplay: String {
+        let s = Int(Date().timeIntervalSince(startedAt))
+        if s < 60 { return "\(s)s" }
+        if s < 3600 { return "\(s/60)m" }
+        return "\(s/3600)h\((s%3600)/60)m"
+    }
 }
 
 // MARK: - Global App State
@@ -731,18 +737,16 @@ struct SessionWidgetView: View {
                     .onLongPressGesture(minimumDuration: 0.5) { session.cycleMascot() }
                     .help("Click: jump to terminal | Hold: change mascot")
 
-                // Session label
+                // Session label + timer
                 HStack(spacing: 3) {
                     Text(session.shortCwd.isEmpty ? session.shortId : session.shortCwd)
                         .font(.system(size: 7 * session.widgetScale, weight: .medium, design: .monospaced))
                         .foregroundColor(.white.opacity(0.6))
                         .lineLimit(1)
 
-                    if !session.costDisplay.isEmpty {
-                        Text(session.costDisplay)
-                            .font(.system(size: 7 * session.widgetScale, weight: .bold, design: .monospaced))
-                            .foregroundColor(.white.opacity(0.35))
-                    }
+                    Text(session.elapsedDisplay)
+                        .font(.system(size: 6 * session.widgetScale, design: .monospaced))
+                        .foregroundColor(.white.opacity(0.25))
                 }
 
                 Text(statusLabel)
