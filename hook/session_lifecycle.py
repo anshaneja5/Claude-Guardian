@@ -36,9 +36,10 @@ GUARDIAN_URL = _get_guardian_url()
 
 
 def find_terminal_info():
-    """Walk up process tree to find the terminal app PID and name."""
+    """Walk up process tree to find the terminal app PID, display name, and process name."""
     terminal_pid = 0
     terminal_app = ""
+    terminal_process = ""  # The actual process name as seen by System Events
     known_terminals = {
         "Terminal", "iTerm2", "wezterm-gui", "kitty", "Cursor", "Code",
         "Windsurf", "ghostty", "alacritty", "Warp", "Zed",
@@ -61,6 +62,7 @@ def find_terminal_info():
                 # Keep going up — the top-most match is the activatable app
             cur = ppid
         terminal_pid = last_match_pid
+        terminal_process = last_match_name  # e.g. "Electron" — what System Events sees
         # For Electron-based apps, extract the real app name from the bundle path
         # e.g. "/Applications/Antigravity.app/Contents/MacOS/Electron" -> "Antigravity"
         if last_match_name == "Electron" and ".app/" in last_match_comm:
@@ -70,16 +72,17 @@ def find_terminal_info():
             terminal_app = last_match_name
     except Exception:
         pass
-    return terminal_pid, terminal_app
+    return terminal_pid, terminal_app, terminal_process
 
 
-def notify(event, session_id, cwd="", terminal_pid=0, terminal_app=""):
+def notify(event, session_id, cwd="", terminal_pid=0, terminal_app="", terminal_process=""):
     payload = json.dumps({
         "event": event,
         "session_id": session_id,
         "cwd": cwd,
         "terminal_pid": terminal_pid,
         "terminal_app": terminal_app,
+        "terminal_process": terminal_process,
     }).encode("utf-8")
 
     req = urllib.request.Request(
@@ -106,8 +109,8 @@ def main():
     cwd = data.get("cwd", "")
 
     if event == "SessionStart":
-        terminal_pid, terminal_app = find_terminal_info()
-        notify(event, session_id, cwd, terminal_pid, terminal_app)
+        terminal_pid, terminal_app, terminal_process = find_terminal_info()
+        notify(event, session_id, cwd, terminal_pid, terminal_app, terminal_process)
     elif event == "SessionEnd":
         notify(event, session_id)
 

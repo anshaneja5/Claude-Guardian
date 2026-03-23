@@ -141,7 +141,8 @@ class SessionState: ObservableObject, Identifiable {
     @Published var mascotName: String
     @Published var costUsd: Double = 0.0
     @Published var terminalPid: Int = 0      // PID of the terminal app
-    @Published var terminalApp: String = ""   // e.g. "Terminal", "iTerm2", "Ghostty"
+    @Published var terminalApp: String = ""   // e.g. "Antigravity", "Cursor", "Terminal"
+    @Published var terminalProcess: String = "" // Process name as seen by System Events (e.g. "Electron")
     @Published var widgetScale: CGFloat = 1.0 // 0.6 to 2.0
     @Published var notification: String = ""  // speech bubble text
     @Published var showNotification: Bool = false
@@ -165,8 +166,56 @@ class SessionState: ObservableObject, Identifiable {
         }
     }
 
+    /// Path components to try matching against window titles, from most specific to broadest.
+    /// e.g. cwd "/Users/x/Desktop/claude anime terminal notifs/claude-guardian"
+    ///   -> ["claude-guardian", "claude anime terminal notifs"]
+    var cwdSearchTerms: [String] {
+        let parts = cwd.split(separator: "/").map(String.init)
+        // Skip generic dirs like Users, Desktop, home folder name
+        let skip: Set<String> = ["Users", "Desktop", "Documents", "Projects", "home", "src", "dev", "code", "work"]
+        var terms: [String] = []
+        for part in parts.reversed() {
+            if !skip.contains(part) && part.count > 1 {
+                terms.append(part)
+            }
+            if terms.count >= 3 { break }
+        }
+        return terms
+    }
+
     func focusTerminal() {
-        // Try matching by app name first (works for Electron-based apps like Cursor, Windsurf, Antigravity)
+        // Use System Events AppleScript to find and raise the specific window.
+        // terminalProcess is the actual process name System Events knows (e.g. "Electron"),
+        // while terminalApp is the human-readable app name (e.g. "Antigravity").
+        let processName = terminalProcess.isEmpty ? terminalApp : terminalProcess
+        if !processName.isEmpty && !cwd.isEmpty {
+            for searchTerm in cwdSearchTerms {
+                let escaped = searchTerm.replacingOccurrences(of: "\"", with: "\\\"")
+                // Raise the matching window FIRST, then bring the app forward.
+                // If we set frontmost first, macOS shows the most-recent window
+                // before we get a chance to pick the right one.
+                let script = """
+                tell application "System Events"
+                    tell process "\(processName)"
+                        repeat with w in (every window)
+                            if name of w contains "\(escaped)" then
+                                perform action "AXRaise" of w
+                                set frontmost to true
+                                return true
+                            end if
+                        end repeat
+                    end tell
+                end tell
+                return false
+                """
+                if let appleScript = NSAppleScript(source: script) {
+                    var error: NSDictionary?
+                    let result = appleScript.executeAndReturnError(&error)
+                    if error == nil && result.booleanValue { return }
+                }
+            }
+        }
+        // Fallback: just activate the app by name
         if !terminalApp.isEmpty {
             let allApps = NSWorkspace.shared.runningApplications
             for app in allApps {
@@ -178,7 +227,7 @@ class SessionState: ObservableObject, Identifiable {
                 }
             }
         }
-        // Fallback: activate by PID directly
+        // Last fallback: activate by PID
         guard terminalPid > 0 else { return }
         if let app = NSRunningApplication(processIdentifier: pid_t(terminalPid)) {
             app.activate()
@@ -567,6 +616,7 @@ class HTTPServer {
         let cwd = json["cwd"] as? String ?? ""
         let terminalPid = json["terminal_pid"] as? Int ?? 0
         let terminalApp = json["terminal_app"] as? String ?? ""
+        let terminalProcess = json["terminal_process"] as? String ?? ""
 
         if event == "SessionStart" {
             state.sessionStarted(sessionId: sessionId, cwd: cwd)
@@ -575,6 +625,7 @@ class HTTPServer {
                 if let session = self.state.sessions.first(where: { $0.id == sessionId }) {
                     session.terminalPid = terminalPid
                     session.terminalApp = terminalApp
+                    session.terminalProcess = terminalProcess.isEmpty ? terminalApp : terminalProcess
                 }
             }
         } else if event == "SessionEnd" {
