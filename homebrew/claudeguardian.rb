@@ -1,6 +1,6 @@
 cask "claudeguardian" do
-  version "1.0.5"
-  sha256 "dfd06b6527e4d461bb8ca105cd01df71cda79722d6e9791bb99e793268877f73"
+  version "1.0.6"
+  sha256 "326ec0c06999bddf9e01b2953817662b19af6c8456c8e5a54486cd2859c5e14d"
 
   url "https://github.com/anshaneja5/Claude-Guardian/releases/download/v#{version}/ClaudeGuardian.zip"
   name "Claude Guardian"
