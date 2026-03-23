@@ -166,6 +166,19 @@ class SessionState: ObservableObject, Identifiable {
     }
 
     func focusTerminal() {
+        // Try matching by app name first (works for Electron-based apps like Cursor, Windsurf, Antigravity)
+        if !terminalApp.isEmpty {
+            let allApps = NSWorkspace.shared.runningApplications
+            for app in allApps {
+                let appName = app.localizedName ?? ""
+                let bundleName = app.bundleURL?.deletingPathExtension().lastPathComponent ?? ""
+                if appName == terminalApp || bundleName == terminalApp {
+                    app.activate()
+                    return
+                }
+            }
+        }
+        // Fallback: activate by PID directly
         guard terminalPid > 0 else { return }
         if let app = NSRunningApplication(processIdentifier: pid_t(terminalPid)) {
             app.activate()

@@ -49,6 +49,7 @@ def find_terminal_info():
         cur = os.getpid()
         last_match_pid = 0
         last_match_name = ""
+        last_match_comm = ""
         while cur and cur != 1:
             ppid = int(os.popen(f"ps -o ppid= -p {cur} 2>/dev/null").read().strip() or "1")
             comm = os.popen(f"ps -o comm= -p {ppid} 2>/dev/null").read().strip()
@@ -56,10 +57,17 @@ def find_terminal_info():
             if name in known_terminals:
                 last_match_pid = ppid
                 last_match_name = name
+                last_match_comm = comm
                 # Keep going up — the top-most match is the activatable app
             cur = ppid
         terminal_pid = last_match_pid
-        terminal_app = last_match_name
+        # For Electron-based apps, extract the real app name from the bundle path
+        # e.g. "/Applications/Antigravity.app/Contents/MacOS/Electron" -> "Antigravity"
+        if last_match_name == "Electron" and ".app/" in last_match_comm:
+            app_path = last_match_comm.split(".app/")[0] + ".app"
+            terminal_app = os.path.basename(app_path).replace(".app", "")
+        else:
+            terminal_app = last_match_name
     except Exception:
         pass
     return terminal_pid, terminal_app
