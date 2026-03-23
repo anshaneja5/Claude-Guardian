@@ -757,7 +757,7 @@ struct AnimatedMascot: View {
 
 class DraggablePanel: NSPanel {
     override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
+    override var canBecomeMain: Bool { false }
 }
 
 // MARK: - Scale Buttons (+/- to resize)
@@ -826,9 +826,10 @@ struct SessionWidgetView: View {
 
             // === Permission panel ===
             if session.showOverlay {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 0) {
                     Rectangle().fill(Color.gray.opacity(0.3)).frame(height: 1).padding(.horizontal, 8)
 
+                    // Header (always visible)
                     HStack {
                         Text("Permission Request")
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -848,72 +849,82 @@ struct SessionWidgetView: View {
                         }
                     }
                     .padding(.horizontal, 10)
+                    .padding(.vertical, 8)
 
-                    if let req = session.currentRequest {
-                        HStack(spacing: 4) {
-                            Text(toolIcon(req.toolName)).font(.system(size: 12))
-                            Text(toolDisplayName(req.toolName))
+                    // Scrollable content area (capped height)
+                    ScrollView(.vertical, showsIndicators: true) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let req = session.currentRequest {
+                                HStack(spacing: 4) {
+                                    Text(toolIcon(req.toolName)).font(.system(size: 12))
+                                    Text(toolDisplayName(req.toolName))
+                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                        .foregroundColor(Color(red: 0.93, green: 0.45, blue: 0.32))
+                                }
+                                .padding(.horizontal, 10)
+
+                                let content = toolContent(req)
+                                Text(content.isEmpty ? "(no content)" : content)
+                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
+                                    .foregroundColor(Color(red: 0.9, green: 0.95, blue: 1.0))
+                                    .textSelection(.enabled)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(7)
+                                    .background(Color(red: 0.06, green: 0.06, blue: 0.09))
+                                    .cornerRadius(5)
+                                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.gray.opacity(0.2), lineWidth: 1))
+                                    .padding(.horizontal, 10)
+                            }
+                        }
+                    }
+                    .frame(maxHeight: 250 * session.widgetScale)
+
+                    // Buttons (always pinned at bottom, never scroll away)
+                    VStack(spacing: 8) {
+                        if showDenyField {
+                            TextField("Message (optional)...", text: $denyMessage)
+                                .textFieldStyle(.plain)
+                                .font(.system(size: 9, design: .monospaced))
+                                .foregroundColor(.white)
+                                .padding(5)
+                                .background(Color.black.opacity(0.4))
+                                .cornerRadius(4)
+                                .padding(.horizontal, 10)
+                        }
+
+                        HStack(spacing: 8) {
+                            Button(action: {
+                                if showDenyField {
+                                    appState.deny(session: session, message: denyMessage)
+                                    denyMessage = ""; showDenyField = false
+                                } else { showDenyField = true }
+                            }) {
+                                HStack(spacing: 2) {
+                                    Text("✕"); Text(showDenyField ? "Send & Deny" : "Deny")
+                                }
                                 .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .foregroundColor(Color(red: 0.93, green: 0.45, blue: 0.32))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity).padding(.vertical, 6)
+                                .background(Color.red.opacity(0.7)).cornerRadius(6)
+                            }.buttonStyle(.plain)
+
+                            Button(action: {
+                                appState.approve(session: session)
+                                showDenyField = false; denyMessage = ""
+                            }) {
+                                HStack(spacing: 2) {
+                                    Text("✓"); Text("Allow")
+                                }
+                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity).padding(.vertical, 6)
+                                .background(Color.green.opacity(0.7)).cornerRadius(6)
+                            }.buttonStyle(.plain)
                         }
                         .padding(.horizontal, 10)
-
-                        let content = toolContent(req)
-                        Text(content.isEmpty ? "(no content)" : content)
-                            .font(.system(size: 10, weight: .medium, design: .monospaced))
-                            .foregroundColor(Color(red: 0.9, green: 0.95, blue: 1.0))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(7)
-                            .background(Color(red: 0.06, green: 0.06, blue: 0.09))
-                            .cornerRadius(5)
-                            .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.gray.opacity(0.2), lineWidth: 1))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .padding(.horizontal, 10)
                     }
-
-                    if showDenyField {
-                        TextField("Message (optional)...", text: $denyMessage)
-                            .textFieldStyle(.plain)
-                            .font(.system(size: 9, design: .monospaced))
-                            .foregroundColor(.white)
-                            .padding(5)
-                            .background(Color.black.opacity(0.4))
-                            .cornerRadius(4)
-                            .padding(.horizontal, 10)
-                    }
-
-                    HStack(spacing: 8) {
-                        Button(action: {
-                            if showDenyField {
-                                appState.deny(session: session, message: denyMessage)
-                                denyMessage = ""; showDenyField = false
-                            } else { showDenyField = true }
-                        }) {
-                            HStack(spacing: 2) {
-                                Text("✕"); Text(showDenyField ? "Send & Deny" : "Deny")
-                            }
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity).padding(.vertical, 6)
-                            .background(Color.red.opacity(0.7)).cornerRadius(6)
-                        }.buttonStyle(.plain)
-
-                        Button(action: {
-                            appState.approve(session: session)
-                            showDenyField = false; denyMessage = ""
-                        }) {
-                            HStack(spacing: 2) {
-                                Text("✓"); Text("Allow")
-                            }
-                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                            .foregroundColor(.white)
-                            .frame(maxWidth: .infinity).padding(.vertical, 6)
-                            .background(Color.green.opacity(0.7)).cornerRadius(6)
-                        }.buttonStyle(.plain)
-                    }
-                    .padding(.horizontal, 10)
                     .padding(.bottom, 10)
+                    .padding(.top, 8)
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
@@ -1217,8 +1228,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             if session.showOverlay {
-                window.makeKeyAndOrderFront(nil)
-                NSApp.activate(ignoringOtherApps: true)
+                // Don't steal focus — just ensure the panel is visible and accepts key input.
+                // The .screenSaver level already keeps it above other windows.
+                window.orderFrontRegardless()
             }
         }
     }

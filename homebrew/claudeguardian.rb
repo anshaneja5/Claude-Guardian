@@ -16,6 +16,12 @@ cask "claudeguardian" do
     system_command "#{appdir}/ClaudeGuardian.app/Contents/Resources/post-install.sh"
   end
 
+  preflight do
+    # Run uninstall script to clean up hooks before the app is removed
+    uninstall_script = "#{appdir}/ClaudeGuardian.app/Contents/Resources/uninstall.sh"
+    system_command uninstall_script if File.exist?(uninstall_script)
+  end
+
   uninstall launchctl: "com.claudeguardian.app",
             quit:      "com.claudeguardian.app"
 

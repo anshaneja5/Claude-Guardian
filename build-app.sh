@@ -41,7 +41,9 @@ echo "[3/4] Bundling resources..."
 cp "$SCRIPT_DIR/hook/"*.py "$APP_BUNDLE/Contents/Resources/hook/"
 cp "$SCRIPT_DIR/guardian.config.json" "$APP_BUNDLE/Contents/Resources/guardian.config.json"
 cp "$SCRIPT_DIR/post-install.sh" "$APP_BUNDLE/Contents/Resources/post-install.sh"
+cp "$SCRIPT_DIR/uninstall.sh" "$APP_BUNDLE/Contents/Resources/uninstall.sh"
 chmod +x "$APP_BUNDLE/Contents/Resources/post-install.sh"
+chmod +x "$APP_BUNDLE/Contents/Resources/uninstall.sh"
 chmod +x "$APP_BUNDLE/Contents/Resources/hook/"*.py
 echo "  ✓ Hooks and config bundled"
 

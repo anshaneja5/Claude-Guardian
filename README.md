@@ -251,10 +251,17 @@ claude-guardian/
 
 ```bash
 brew uninstall --cask claudeguardian
-# Then edit ~/.claude/settings.json and remove the Guardian hook entries
 ```
 
+This automatically stops the app, removes hooks from `~/.claude/settings.json`, and cleans up the launch agent.
+
 ### If installed from source
+
+```bash
+./uninstall.sh
+```
+
+Or manually:
 
 ```bash
 # 1. Stop the running app
