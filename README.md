@@ -45,7 +45,11 @@ brew install --cask claudeguardian
 
 This installs the app to `/Applications/`, sets up Claude Code hooks, copies the default config to `~/.config/claude-guardian/`, and launches Guardian automatically.
 
-> **macOS Gatekeeper note:** Since the app isn't notarized, macOS will block it on first launch. Go to **System Settings > Privacy & Security**, scroll down, and click **"Open Anyway"** next to the ClaudeGuardian message. You only need to do this once.
+> **macOS Gatekeeper note:** Since the app isn't notarized, macOS may show "app is damaged" or block it on first launch. Run this once to fix it:
+> ```bash
+> xattr -cr /Applications/ClaudeGuardian.app
+> ```
+> Then open the app normally. You only need to do this once.
 
 ### From Source
 

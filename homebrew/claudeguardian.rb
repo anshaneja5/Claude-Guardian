@@ -12,6 +12,7 @@ cask "claudeguardian" do
   app "ClaudeGuardian.app"
 
   postflight do
+    system_command "/usr/bin/xattr", args: ["-cr", "#{appdir}/ClaudeGuardian.app"]
     system_command "#{appdir}/ClaudeGuardian.app/Contents/Resources/post-install.sh"
   end
 
