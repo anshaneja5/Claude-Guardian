@@ -596,42 +596,19 @@ class HTTPServer {
         }
     }
 
-    private func debugLog(_ msg: String) {
-        let entry = "\(Date()): \(msg)\n"
-        if let data = entry.data(using: .utf8) {
-            let url = URL(fileURLWithPath: "/tmp/guardian-debug.log")
-            if let fh = try? FileHandle(forWritingTo: url) {
-                fh.seekToEndOfFile()
-                fh.write(data)
-                fh.closeFile()
-            } else {
-                try? data.write(to: url)
-            }
-        }
-    }
-
     private func handlePermissionRequest(rawRequest: String, connection: NWConnection) {
         guard let bodyRange = rawRequest.range(of: "\r\n\r\n") else {
-            debugLog("/request — no body separator found")
             sendResponse(connection: connection, status: 400, body: #"{"error":"no body"}"#)
             return
         }
         let bodyString = String(rawRequest[bodyRange.upperBound...])
-        guard let bodyData = bodyString.data(using: .utf8) else {
-            debugLog("/request — body not valid UTF-8")
+        guard let bodyData = bodyString.data(using: .utf8),
+              let request = try? JSONDecoder().decode(PermissionRequest.self, from: bodyData) else {
             sendResponse(connection: connection, status: 400, body: #"{"error":"invalid json"}"#)
             return
         }
-        do {
-            let request = try JSONDecoder().decode(PermissionRequest.self, from: bodyData)
-            debugLog("/request decoded OK — tool=\(request.toolName) session=\(request.sessionId)")
-            let requestId = state.submitRequest(request)
-            sendResponse(connection: connection, status: 200, body: "{\"request_id\":\"\(requestId)\",\"status\":\"pending\"}")
-        } catch {
-            debugLog("/request decode FAILED — error=\(error)")
-            debugLog("/request body was: \(bodyString.prefix(500))")
-            sendResponse(connection: connection, status: 400, body: #"{"error":"invalid json"}"#)
-        }
+        let requestId = state.submitRequest(request)
+        sendResponse(connection: connection, status: 200, body: "{\"request_id\":\"\(requestId)\",\"status\":\"pending\"}")
     }
 
     private func handleSessionEvent(rawRequest: String, connection: NWConnection) {

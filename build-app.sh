@@ -20,16 +20,30 @@ mkdir -p "$BUILD_DIR"
 mkdir -p "$APP_BUNDLE/Contents/MacOS"
 mkdir -p "$APP_BUNDLE/Contents/Resources/hook"
 
-# Step 1: Compile Swift
+# Step 1: Compile Swift (universal binary for Intel + Apple Silicon)
 echo "[1/4] Compiling Swift sources..."
-swiftc -o "$APP_BUNDLE/Contents/MacOS/$APP_NAME" \
+swiftc -o "$APP_BUNDLE/Contents/MacOS/${APP_NAME}-arm64" \
     "$SRC_DIR/Sources/main.swift" \
     "$SRC_DIR/Sources/sprites.swift" \
     -framework Cocoa \
     -framework SwiftUI \
     -framework Network \
+    -target arm64-apple-macosx13.0 \
     -O 2>&1
-echo "  ✓ Binary compiled"
+swiftc -o "$APP_BUNDLE/Contents/MacOS/${APP_NAME}-x86_64" \
+    "$SRC_DIR/Sources/main.swift" \
+    "$SRC_DIR/Sources/sprites.swift" \
+    -framework Cocoa \
+    -framework SwiftUI \
+    -framework Network \
+    -target x86_64-apple-macosx13.0 \
+    -O 2>&1
+lipo -create \
+    "$APP_BUNDLE/Contents/MacOS/${APP_NAME}-arm64" \
+    "$APP_BUNDLE/Contents/MacOS/${APP_NAME}-x86_64" \
+    -output "$APP_BUNDLE/Contents/MacOS/$APP_NAME"
+rm "$APP_BUNDLE/Contents/MacOS/${APP_NAME}-arm64" "$APP_BUNDLE/Contents/MacOS/${APP_NAME}-x86_64"
+echo "  ✓ Universal binary compiled (arm64 + x86_64)"
 
 # Step 2: Copy Info.plist
 echo "[2/4] Copying Info.plist..."
