@@ -362,7 +362,18 @@ class AppState: ObservableObject {
 
         DispatchQueue.main.async {
             playSound("Submarine")  // alert sound when permission needed
-            let session = self.getOrCreateSession(sessionId: request.sessionId)
+            // Ensure session exists in the array before setting properties.
+            // getOrCreateSession may defer the append, so do it inline here.
+            let session: SessionState
+            if let existing = self.sessions.first(where: { $0.id == request.sessionId }) {
+                session = existing
+            } else {
+                let newSession = SessionState(id: request.sessionId, cwd: "", timeout: self.config.timeoutSeconds, mascot: self.config.mascot)
+                self.sessions.append(newSession)
+                session = newSession
+            }
+            // Set request data THEN show overlay — atomic on main queue so
+            // SwiftUI never sees showOverlay=true with currentRequest=nil.
             session.currentRequest = request
             session.status = .pendingPermission
             session.countdown = self.config.timeoutSeconds
