@@ -139,6 +139,11 @@ def main():
     tool_input = hook_input.get("tool_input", {})
     session_id = hook_input.get("session_id", "unknown")
 
+    # Debug: log what we received
+    import sys as _sys
+    _sys.stderr.write(f"GUARDIAN HOOK DEBUG [PermissionRequest]: tool_name={tool_name!r} session={session_id!r} keys={list(hook_input.keys())}\n")
+    _sys.stderr.flush()
+
     # Send cost update if available
     cost_data = hook_input.get("cost", {})
     cost_usd = cost_data.get("total_cost_usd", 0) if isinstance(cost_data, dict) else 0

@@ -372,8 +372,9 @@ class AppState: ObservableObject {
                 self.sessions.append(newSession)
                 session = newSession
             }
-            // Set request data THEN show overlay — atomic on main queue so
-            // SwiftUI never sees showOverlay=true with currentRequest=nil.
+            // Set request data first, then show overlay on next runloop cycle.
+            // This ensures the window/view has been created and subscribed to
+            // the session's @Published properties before showOverlay triggers rendering.
             session.currentRequest = request
             session.status = .pendingPermission
             session.countdown = self.config.timeoutSeconds
@@ -595,19 +596,42 @@ class HTTPServer {
         }
     }
 
+    private func debugLog(_ msg: String) {
+        let entry = "\(Date()): \(msg)\n"
+        if let data = entry.data(using: .utf8) {
+            let url = URL(fileURLWithPath: "/tmp/guardian-debug.log")
+            if let fh = try? FileHandle(forWritingTo: url) {
+                fh.seekToEndOfFile()
+                fh.write(data)
+                fh.closeFile()
+            } else {
+                try? data.write(to: url)
+            }
+        }
+    }
+
     private func handlePermissionRequest(rawRequest: String, connection: NWConnection) {
         guard let bodyRange = rawRequest.range(of: "\r\n\r\n") else {
+            debugLog("/request — no body separator found")
             sendResponse(connection: connection, status: 400, body: #"{"error":"no body"}"#)
             return
         }
         let bodyString = String(rawRequest[bodyRange.upperBound...])
-        guard let bodyData = bodyString.data(using: .utf8),
-              let request = try? JSONDecoder().decode(PermissionRequest.self, from: bodyData) else {
+        guard let bodyData = bodyString.data(using: .utf8) else {
+            debugLog("/request — body not valid UTF-8")
             sendResponse(connection: connection, status: 400, body: #"{"error":"invalid json"}"#)
             return
         }
-        let requestId = state.submitRequest(request)
-        sendResponse(connection: connection, status: 200, body: "{\"request_id\":\"\(requestId)\",\"status\":\"pending\"}")
+        do {
+            let request = try JSONDecoder().decode(PermissionRequest.self, from: bodyData)
+            debugLog("/request decoded OK — tool=\(request.toolName) session=\(request.sessionId)")
+            let requestId = state.submitRequest(request)
+            sendResponse(connection: connection, status: 200, body: "{\"request_id\":\"\(requestId)\",\"status\":\"pending\"}")
+        } catch {
+            debugLog("/request decode FAILED — error=\(error)")
+            debugLog("/request body was: \(bodyString.prefix(500))")
+            sendResponse(connection: connection, status: 400, body: #"{"error":"invalid json"}"#)
+        }
     }
 
     private func handleSessionEvent(rawRequest: String, connection: NWConnection) {
@@ -837,10 +861,9 @@ struct SessionWidgetView: View {
 
             // === Permission panel ===
             if session.showOverlay {
-                VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
                     Rectangle().fill(Color.gray.opacity(0.3)).frame(height: 1).padding(.horizontal, 8)
 
-                    // Header (always visible)
                     HStack {
                         Text("Permission Request")
                             .font(.system(size: 10, weight: .semibold, design: .monospaced))
@@ -860,82 +883,74 @@ struct SessionWidgetView: View {
                         }
                     }
                     .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
 
-                    // Scrollable content area (capped height)
+                    // Tool name — always show, use currentRequest directly
+                    HStack(spacing: 4) {
+                        Text(toolIcon(session.currentRequest?.toolName ?? "")).font(.system(size: 12))
+                        Text(toolDisplayName(session.currentRequest?.toolName ?? "Unknown"))
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(Color(red: 0.93, green: 0.45, blue: 0.32))
+                    }
+                    .padding(.horizontal, 10)
+
+                    // Tool content — fixed 250px height, scrollable
                     ScrollView(.vertical, showsIndicators: true) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            if let req = session.currentRequest {
-                                HStack(spacing: 4) {
-                                    Text(toolIcon(req.toolName)).font(.system(size: 12))
-                                    Text(toolDisplayName(req.toolName))
-                                        .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                        .foregroundColor(Color(red: 0.93, green: 0.45, blue: 0.32))
-                                }
-                                .padding(.horizontal, 10)
+                        Text(session.currentRequest.map { toolContent($0) } ?? "Loading...")
+                            .font(.system(size: 10, weight: .medium, design: .monospaced))
+                            .foregroundColor(Color(red: 0.9, green: 0.95, blue: 1.0))
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(7)
+                    }
+                    .frame(height: 250)
+                    .background(Color(red: 0.06, green: 0.06, blue: 0.09))
+                    .cornerRadius(5)
+                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.gray.opacity(0.2), lineWidth: 1))
+                    .padding(.horizontal, 10)
 
-                                let content = toolContent(req)
-                                Text(content.isEmpty ? "(no content)" : content)
-                                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                                    .foregroundColor(Color(red: 0.9, green: 0.95, blue: 1.0))
-                                    .textSelection(.enabled)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(7)
-                                    .background(Color(red: 0.06, green: 0.06, blue: 0.09))
-                                    .cornerRadius(5)
-                                    .overlay(RoundedRectangle(cornerRadius: 5).stroke(Color.gray.opacity(0.2), lineWidth: 1))
-                                    .padding(.horizontal, 10)
+                    if showDenyField {
+                        TextField("Message (optional)...", text: $denyMessage)
+                            .textFieldStyle(.plain)
+                            .font(.system(size: 9, design: .monospaced))
+                            .foregroundColor(.white)
+                            .padding(5)
+                            .background(Color.black.opacity(0.4))
+                            .cornerRadius(4)
+                            .padding(.horizontal, 10)
+                    }
+
+                    HStack(spacing: 8) {
+                        Button(action: {
+                            if showDenyField {
+                                appState.deny(session: session, message: denyMessage)
+                                denyMessage = ""; showDenyField = false
+                            } else { showDenyField = true }
+                        }) {
+                            HStack(spacing: 2) {
+                                Text("✕"); Text(showDenyField ? "Send & Deny" : "Deny")
                             }
-                        }
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity).padding(.vertical, 6)
+                            .background(Color.red.opacity(0.7)).cornerRadius(6)
+                        }.buttonStyle(.plain)
+
+                        Button(action: {
+                            appState.approve(session: session)
+                            showDenyField = false; denyMessage = ""
+                        }) {
+                            HStack(spacing: 2) {
+                                Text("✓"); Text("Allow")
+                            }
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity).padding(.vertical, 6)
+                            .background(Color.green.opacity(0.7)).cornerRadius(6)
+                        }.buttonStyle(.plain)
                     }
-                    .frame(maxHeight: 250 * session.widgetScale)
-
-                    // Buttons (always pinned at bottom, never scroll away)
-                    VStack(spacing: 8) {
-                        if showDenyField {
-                            TextField("Message (optional)...", text: $denyMessage)
-                                .textFieldStyle(.plain)
-                                .font(.system(size: 9, design: .monospaced))
-                                .foregroundColor(.white)
-                                .padding(5)
-                                .background(Color.black.opacity(0.4))
-                                .cornerRadius(4)
-                                .padding(.horizontal, 10)
-                        }
-
-                        HStack(spacing: 8) {
-                            Button(action: {
-                                if showDenyField {
-                                    appState.deny(session: session, message: denyMessage)
-                                    denyMessage = ""; showDenyField = false
-                                } else { showDenyField = true }
-                            }) {
-                                HStack(spacing: 2) {
-                                    Text("✕"); Text(showDenyField ? "Send & Deny" : "Deny")
-                                }
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity).padding(.vertical, 6)
-                                .background(Color.red.opacity(0.7)).cornerRadius(6)
-                            }.buttonStyle(.plain)
-
-                            Button(action: {
-                                appState.approve(session: session)
-                                showDenyField = false; denyMessage = ""
-                            }) {
-                                HStack(spacing: 2) {
-                                    Text("✓"); Text("Allow")
-                                }
-                                .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                                .foregroundColor(.white)
-                                .frame(maxWidth: .infinity).padding(.vertical, 6)
-                                .background(Color.green.opacity(0.7)).cornerRadius(6)
-                            }.buttonStyle(.plain)
-                        }
-                        .padding(.horizontal, 10)
-                    }
+                    .padding(.horizontal, 10)
                     .padding(.bottom, 10)
-                    .padding(.top, 8)
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
             }
