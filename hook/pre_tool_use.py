@@ -47,6 +47,58 @@ def _get_guardian_url():
 GUARDIAN_URL = _get_guardian_url()
 
 
+def is_claude_allowed(tool_name, tool_input):
+    """Check if this tool call is already allowed in Claude Code's settings allow lists.
+    If so, Guardian should not intercept — let Claude Code handle it silently."""
+    settings_paths = [
+        os.path.expanduser("~/.claude/settings.json"),
+        os.path.expanduser("~/.claude/settings.local.json"),
+        os.path.join(os.getcwd(), ".claude", "settings.json"),
+        os.path.join(os.getcwd(), ".claude", "settings.local.json"),
+    ]
+    allow_patterns = []
+    for path in settings_paths:
+        try:
+            with open(path, "r") as f:
+                data = json.load(f)
+            allow_patterns.extend(data.get("permissions", {}).get("allow", []))
+        except Exception:
+            pass
+
+    if not allow_patterns:
+        return False
+
+    # Get the primary string argument for the tool (e.g. command for Bash, file_path for Write)
+    tool_arg = ""
+    if isinstance(tool_input, dict):
+        tool_arg = (tool_input.get("command") or tool_input.get("file_path") or
+                    tool_input.get("path") or tool_input.get("query") or "")
+
+    for pattern in allow_patterns:
+        # Pattern format: "ToolName(arg_pattern)" or just "ToolName"
+        if "(" in pattern:
+            pat_tool = pattern[:pattern.index("(")]
+            pat_arg = pattern[pattern.index("(")+1:pattern.rindex(")")]
+        else:
+            pat_tool = pattern
+            pat_arg = "*"
+
+        if pat_tool != tool_name:
+            continue
+
+        # Match arg pattern: supports * wildcard and prefix matching like "chmod:*"
+        if pat_arg == "*":
+            return True
+        if "*" in pat_arg:
+            prefix = pat_arg.split("*")[0]
+            if tool_arg.startswith(prefix):
+                return True
+        elif tool_arg == pat_arg:
+            return True
+
+    return False
+
+
 def check_server():
     """Check if Guardian app is running."""
     try:
@@ -176,6 +228,10 @@ def main():
         send_cost_update(session_id, cost_usd)
 
     config = load_config()
+
+    # If already allowed in Claude Code's own settings, don't intercept — fall through silently
+    if is_claude_allowed(tool_name, tool_input):
+        sys.exit(0)
 
     # In bypass/notify-only mode: auto-approve everything, just inform the mascot passively
     if is_bypass_mode(config):
