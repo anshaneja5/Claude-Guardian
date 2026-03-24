@@ -2,6 +2,7 @@
   "port": 9001,
   "timeout_seconds": 300,
   "mascot": "cat",
+  "notify_only": false,
   "auto_approve": [
     "Read",
     "Glob",

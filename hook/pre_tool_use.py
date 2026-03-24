@@ -140,6 +140,24 @@ def poll_for_decision(request_id, timeout=60):
     return "deny", "Hook polling timed out"
 
 
+def is_bypass_mode(config):
+    """Detect if Claude Code is running with bypass permissions (--dangerously-skip-permissions).
+    Also returns True if notify_only is set in guardian config."""
+    if config.get("notify_only", False):
+        return True
+    try:
+        cur = os.getpid()
+        while cur and cur != 1:
+            ppid = int(os.popen(f"ps -o ppid= -p {cur} 2>/dev/null").read().strip() or "1")
+            args = os.popen(f"ps -o args= -p {ppid} 2>/dev/null").read().strip()
+            if "dangerously-skip-permissions" in args:
+                return True
+            cur = ppid
+    except Exception:
+        pass
+    return False
+
+
 def main():
     raw_input = sys.stdin.read()
     try:
@@ -158,6 +176,28 @@ def main():
         send_cost_update(session_id, cost_usd)
 
     config = load_config()
+
+    # In bypass/notify-only mode: auto-approve everything, just inform the mascot passively
+    if is_bypass_mode(config):
+        if check_server():
+            try:
+                payload = json.dumps({
+                    "tool_name": tool_name,
+                    "tool_input": tool_input,
+                    "session_id": session_id,
+                    "timestamp": time.time(),
+                    "notify_only": True,
+                }).encode("utf-8")
+                req = urllib.request.Request(
+                    f"{GUARDIAN_URL}/request",
+                    data=payload,
+                    headers={"Content-Type": "application/json"},
+                    method="POST"
+                )
+                urllib.request.urlopen(req, timeout=1)
+            except Exception:
+                pass
+        sys.exit(0)
 
     # Check auto-approve list
     if tool_name in config.get("auto_approve", []):
