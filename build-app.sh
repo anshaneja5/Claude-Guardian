@@ -25,17 +25,23 @@ echo "[1/4] Compiling Swift sources..."
 swiftc -o "$APP_BUNDLE/Contents/MacOS/${APP_NAME}-arm64" \
     "$SRC_DIR/Sources/main.swift" \
     "$SRC_DIR/Sources/sprites.swift" \
+    "$SRC_DIR/Sources/ClaudeAnalytics.swift" \
+    "$SRC_DIR/Sources/StatsView.swift" \
     -framework Cocoa \
     -framework SwiftUI \
     -framework Network \
+    -framework Charts \
     -target arm64-apple-macosx13.0 \
     -O 2>&1
 swiftc -o "$APP_BUNDLE/Contents/MacOS/${APP_NAME}-x86_64" \
     "$SRC_DIR/Sources/main.swift" \
     "$SRC_DIR/Sources/sprites.swift" \
+    "$SRC_DIR/Sources/ClaudeAnalytics.swift" \
+    "$SRC_DIR/Sources/StatsView.swift" \
     -framework Cocoa \
     -framework SwiftUI \
     -framework Network \
+    -framework Charts \
     -target x86_64-apple-macosx13.0 \
     -O 2>&1
 lipo -create \

@@ -1149,7 +1149,7 @@ struct HistoryView: View {
             .foregroundColor(.red)
         }
         .padding(12)
-        .frame(width: 320)
+        .frame(maxWidth: .infinity)
     }
 
     private var filteredHistory: [HistoryEntry] {
@@ -1176,6 +1176,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     var popover: NSPopover!
     var server: HTTPServer!
     let appState = AppState.shared
+    let analyticsStore = ClaudeAnalyticsStore.shared
     var statusAnimationTimer: Timer?
     var sessionWindows: [String: NSWindow] = [:]  // session_id -> window
     var windowCounter: Int = 0
@@ -1186,6 +1187,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupMenubar()
         startServer()
         startStatusAnimation()
+        analyticsStore.startWatching()
 
         // Poll for session changes: create/remove windows, activate when needed
         Timer.scheduledTimer(withTimeInterval: 0.2, repeats: true) { [weak self] _ in
@@ -1271,9 +1273,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
         }
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 320, height: 450)
+        popover.contentSize = NSSize(width: 400, height: 480)
         popover.behavior = .transient
-        popover.contentViewController = NSHostingController(rootView: HistoryView(appState: appState))
+        popover.contentViewController = NSHostingController(
+            rootView: MenubarRootView(appState: appState, analyticsStore: analyticsStore)
+        )
     }
 
     private func startServer() {
@@ -1296,14 +1300,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func togglePopover() {
-        if let button = statusItem.button {
-            if popover.isShown {
-                popover.performClose(nil)
+        guard let button = statusItem.button else { return }
+        if popover.isShown {
+            popover.performClose(nil)
+            return
+        }
+        popover.contentViewController = NSHostingController(
+            rootView: MenubarRootView(appState: appState, analyticsStore: analyticsStore)
+        )
+        popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+    }
+}
+
+// MARK: - Menubar Root View (Guardian + Stats tabs)
+
+struct MenubarRootView: View {
+    @ObservedObject var appState: AppState
+    @ObservedObject var analyticsStore: ClaudeAnalyticsStore
+    @State private var selectedTab: Int = 0
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Picker("", selection: $selectedTab) {
+                Text("Guardian").tag(0)
+                Text("Stats").tag(1)
+            }
+            .pickerStyle(.segmented)
+            .padding(.horizontal, 12)
+            .padding(.top, 10)
+            .padding(.bottom, 6)
+
+            Divider()
+
+            if selectedTab == 0 {
+                HistoryView(appState: appState)
             } else {
-                popover.contentViewController = NSHostingController(rootView: HistoryView(appState: appState))
-                popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+                StatsMenuView(store: analyticsStore)
             }
         }
+        .frame(width: 400)
     }
 }
 

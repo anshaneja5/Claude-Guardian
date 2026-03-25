@@ -8,9 +8,13 @@
   <em>A living mascot that floats above your windows, guards your Claude Code sessions, and lets you approve or deny actions without leaving your flow.</em>
 </p>
 
+<p align="center">
+  <strong>v2.0 — now includes built-in Claude Code analytics dashboard</strong>
+</p>
+
 ---
 
-Each terminal session gets its own mascot — every active session spawns an independent mascot on screen, handling its own permission requests.
+Each terminal session gets its own mascot — every active session spawns an independent mascot on screen, handling its own permission requests. Click the menubar icon to see live usage stats, costs, token breakdowns, and trends.
 
 ## How It Works
 
@@ -79,6 +83,19 @@ swiftc -o ClaudeGuardian Sources/main.swift Sources/sprites.swift \
 ```
 
 ## Features
+
+### Analytics Dashboard (v2)
+Click the menubar icon → **Stats** tab to see a full analytics dashboard powered by your local `~/.claude/` data:
+- **Today** — cost, sessions, messages, tokens, token breakdown by type, rate limits (5-hour & 7-day), recent sessions
+- **All Time** — lifetime totals, average daily cost, active days, model breakdown (Opus/Sonnet/Haiku)
+- **Projects** — cost ranked by project with visual progress bars
+- **Trends** — 7-day cost chart + 30-day daily history table
+- Auto-syncs on file changes, 100% local — no data leaves your machine
+
+### Bypass Permissions Mode
+- When running `claude --dangerously-skip-permissions`, Guardian steps aside completely — no mascot, no overlay, total silence
+- Set `"notify_only": true` in `~/.config/claude-guardian/guardian.config.json` to always run in this mode
+- Tools already allowed in Claude Code's own `settings.json` / `settings.local.json` are also auto-approved silently
 
 ### Multi-Session Support
 - Each Claude Code session gets its **own mascot widget** on screen

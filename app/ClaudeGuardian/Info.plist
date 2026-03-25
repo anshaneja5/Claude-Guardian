@@ -9,9 +9,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.claudeguardian.app</string>
     <key>CFBundleVersion</key>
-    <string>1.0.0</string>
+    <string>2.0.0</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0.0</string>
+    <string>2.0.0</string>
     <key>CFBundleExecutable</key>
     <string>ClaudeGuardian</string>
     <key>CFBundlePackageType</key>
