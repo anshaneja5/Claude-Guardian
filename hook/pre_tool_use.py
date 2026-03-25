@@ -229,13 +229,29 @@ def main():
 
     config = load_config()
 
-    # If already allowed in Claude Code's own settings, don't intercept — fall through silently
-    if is_claude_allowed(tool_name, tool_input):
-        sys.exit(0)
-
     # In bypass/notify-only mode: do nothing at all — silent passthrough
     if is_bypass_mode(config):
         sys.exit(0)
+
+    claude_allowed = is_claude_allowed(tool_name, tool_input)
+
+    if not claude_allowed:
+        # Tool is NOT in Claude Code's allow list — PermissionRequest will fire and
+        # handle the Guardian prompt. PreToolUse only enforces always_block here to
+        # prevent a double-prompt (PreToolUse + PermissionRequest both showing Guardian UI).
+        if tool_name in config.get("always_block", []):
+            result = {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": f"Blocked: {tool_name} is in always_block list"
+                }
+            }
+            print(json.dumps(result))
+        sys.exit(0)
+
+    # Tool IS in Claude Code's allow list — PermissionRequest will NOT fire for it,
+    # so PreToolUse is the only Guardian gatekeeper here.
 
     # Check auto-approve list
     if tool_name in config.get("auto_approve", []):
