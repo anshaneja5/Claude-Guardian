@@ -9,7 +9,6 @@ struct PermissionRequest: Identifiable, Codable {
     let toolInput: [String: AnyCodableValue]
     let sessionId: String
     let timestamp: Double
-    var notifyOnly: Bool = false  // true when bypass permissions is active
     var status: RequestStatus = .pending
     var message: String = ""
 
@@ -17,7 +16,6 @@ struct PermissionRequest: Identifiable, Codable {
         case toolName = "tool_name"
         case toolInput = "tool_input"
         case sessionId = "session_id"
-        case notifyOnly = "notify_only"
         case timestamp
     }
 
@@ -359,24 +357,6 @@ class AppState: ObservableObject {
         }
 
         // Notify-only mode (bypass permissions active): auto-approve, just show working state
-        if request.notifyOnly {
-            lock.lock()
-            decisions[request.id] = (status: .approved, message: "")
-            lock.unlock()
-            DispatchQueue.main.async {
-                let session: SessionState
-                if let existing = self.sessions.first(where: { $0.id == request.sessionId }) {
-                    session = existing
-                } else {
-                    let newSession = SessionState(id: request.sessionId, cwd: "", timeout: self.config.timeoutSeconds, mascot: self.config.mascot)
-                    self.sessions.append(newSession)
-                    session = newSession
-                }
-                session.status = .active
-            }
-            return request.id
-        }
-
         lock.lock()
         decisions[request.id] = (status: .pending, message: "")
         lock.unlock()

@@ -233,26 +233,8 @@ def main():
     if is_claude_allowed(tool_name, tool_input):
         sys.exit(0)
 
-    # In bypass/notify-only mode: auto-approve everything, just inform the mascot passively
+    # In bypass/notify-only mode: do nothing at all — silent passthrough
     if is_bypass_mode(config):
-        if check_server():
-            try:
-                payload = json.dumps({
-                    "tool_name": tool_name,
-                    "tool_input": tool_input,
-                    "session_id": session_id,
-                    "timestamp": time.time(),
-                    "notify_only": True,
-                }).encode("utf-8")
-                req = urllib.request.Request(
-                    f"{GUARDIAN_URL}/request",
-                    data=payload,
-                    headers={"Content-Type": "application/json"},
-                    method="POST"
-                )
-                urllib.request.urlopen(req, timeout=1)
-            except Exception:
-                pass
         sys.exit(0)
 
     # Check auto-approve list
