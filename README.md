@@ -55,6 +55,13 @@ This installs the app to `/Applications/`, sets up Claude Code hooks, copies the
 > ```
 > Then open the app normally. You only need to do this once.
 
+### Upgrading
+
+```bash
+brew update
+brew upgrade --cask claudeguardian
+```
+
 ### From Source
 
 ```bash
