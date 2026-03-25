@@ -470,13 +470,26 @@ class AppState: ObservableObject {
 
     func showNotification(sessionId: String, message: String) {
         DispatchQueue.main.async {
-            if let session = self.sessions.first(where: { $0.id == sessionId }) {
-                session.notification = message
-                session.showNotification = true
-                playSound("Blow")  // notification sound
-                // Auto-dismiss after 5 seconds
-                DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
-                    session.showNotification = false
+            let isTemporary: Bool
+            let session: SessionState
+            if let existing = self.sessions.first(where: { $0.id == sessionId }) {
+                session = existing
+                isTemporary = false
+            } else {
+                // No active session (e.g. bypass/dangerously-skip-permissions mode).
+                // Create a temporary mascot just to show this notification.
+                session = SessionState(id: sessionId, cwd: "", timeout: self.config.timeoutSeconds, mascot: self.config.mascot)
+                self.sessions.append(session)
+                isTemporary = true
+            }
+            session.notification = message
+            session.showNotification = true
+            playSound("Blow")  // notification sound
+            // Auto-dismiss after 5 seconds, then clean up temporary session
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+                session.showNotification = false
+                if isTemporary {
+                    self.sessions.removeAll { $0.id == sessionId }
                 }
             }
         }

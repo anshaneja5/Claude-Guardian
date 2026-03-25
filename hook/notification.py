@@ -44,6 +44,12 @@ def main():
         sys.exit(0)
 
     session_id = data.get("session_id", "unknown")
+
+    # "idle" notifications fire every time Claude stops waiting for input —
+    # already handled by the Stop hook ("Claude finished coding! ✓"), so skip.
+    if data.get("notification_type") == "idle":
+        sys.exit(0)
+
     # Notification message can be in different fields
     message = data.get("message", "") or data.get("notification", "") or data.get("content", "")
 
