@@ -36,6 +36,7 @@ HOOK_SCRIPT="$HOOK_DIR/pre_tool_use.py"
 LIFECYCLE_SCRIPT="$HOOK_DIR/session_lifecycle.py"
 PERMISSION_SCRIPT="$HOOK_DIR/permission_request.py"
 NOTIFICATION_SCRIPT="$HOOK_DIR/notification.py"
+STOP_SCRIPT="$HOOK_DIR/stop.py"
 SETTINGS_FILE="$HOME/.claude/settings.json"
 USER_CONFIG_DIR="$HOME/.config/claude-guardian"
 PLIST_NAME="com.claudeguardian.app"
@@ -72,6 +73,7 @@ hook_script = '$HOOK_SCRIPT'
 lifecycle_script = '$LIFECYCLE_SCRIPT'
 perm_script = '$PERMISSION_SCRIPT'
 notif_script = '$NOTIFICATION_SCRIPT'
+stop_script = '$STOP_SCRIPT'
 
 with open(settings_path, 'r') as f:
     settings = json.load(f)
@@ -121,6 +123,15 @@ settings['hooks']['Notification'] = [{
         'type': 'command',
         'command': f\"python3 '{notif_script}'\",
         'timeout': 5
+    }]
+}]
+
+settings['hooks']['Stop'] = [{
+    'matcher': '',
+    'hooks': [{
+        'type': 'command',
+        'command': f\"python3 '{stop_script}'\",
+        'timeout': 12
     }]
 }]
 
