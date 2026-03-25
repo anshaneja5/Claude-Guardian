@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <strong>v2.0 — now includes built-in Claude Code analytics dashboard</strong>
+  <strong>v2.2 — Always Allow button · keyboard shortcuts · hide/show mode · stop notifications</strong>
 </p>
 
 ---
@@ -25,9 +25,12 @@ flowchart LR
     B -->|"Blocked tool"| D["Auto-denied"]
     B -->|"Needs approval"| E["Guardian App\nshows overlay"]
     E --> F{"You decide"}
-    F -->|"Click Allow"| G["Tool runs"]
-    F -->|"Click Deny"| H["Tool blocked\n+ message to Claude"]
+    F -->|"Allow / Y / Enter"| G["Tool runs"]
+    F -->|"Always ★"| J["Tool runs +\nadded to auto_approve"]
+    F -->|"Deny / N / Esc"| H["Tool blocked\n+ message to Claude"]
     F -->|"No response"| I["Auto-denied\nafter timeout"]
+
+    style J fill:#d97706,color:#fff
 
     style A fill:#f4845f,color:#fff
     style C fill:#4ade80,color:#000
@@ -99,6 +102,11 @@ Click the menubar icon → **Stats** tab to see a full analytics dashboard power
 - **Trends** — 7-day cost chart + 30-day daily history table
 - Auto-syncs on file changes, 100% local — no data leaves your machine
 
+### Stop Notifications
+- When Claude finishes a response, the mascot shows **"Claude finished coding! ✓"** as a speech bubble
+- If Guardian isn't running when Claude stops, it auto-launches the app to show the notification
+- Works even in bypass mode — a temporary mascot pops up, shows the message, then disappears
+
 ### Bypass Permissions Mode
 - When running `claude --dangerously-skip-permissions`, Guardian steps aside completely — no mascot, no overlay, total silence
 - Set `"notify_only": true` in `~/.config/claude-guardian/guardian.config.json` to always run in this mode
@@ -149,28 +157,29 @@ Click the menubar icon → **Stats** tab to see a full analytics dashboard power
 - Expands below the mascot when Claude needs approval
 - Shows the **tool type** (Shell Command, Write File, Edit File, etc.)
 - Shows the **exact content** — the command, file path, code changes, etc.
-- **Allow** button (or press **Enter**) to approve
-- **Deny** button (or press **Esc**) to reject
-  - Click Deny once to reveal a text field where you can type a message back to Claude (e.g. "don't delete that, use X instead")
-  - Click "Send & Deny" to send the message and reject
+- Three buttons:
+  - **✓ Allow** (or press `Y` / `Return`) — approve this action
+  - **★ Always** — approve this action and permanently add the tool to `auto_approve` (no config editing needed)
+  - **✕ Deny** (or press `N` / `Escape`) — first press reveals a text field to type a message back to Claude, second press sends and rejects
+- Keyboard shortcuts work automatically — no need to click the mascot first
 - Countdown timer — auto-denies after timeout (default 300 seconds)
 - Panel collapses back to just the mascot after you respond
 
 ### Menu Bar
 - Status icon in the macOS menu bar: 🟢 no sessions, 🟠 active, 🔴 needs attention, ✅ just approved, ❌ just denied
 - Click the icon to see:
-  - **Active sessions** with **Hide/Show** buttons — hide a mascot if you don't need it for that session
+  - **Active sessions** with **Hide/Show** buttons
   - Session cost and project name at a glance
   - Approve/deny stats
   - Searchable action history log (last 50 actions)
   - Filter bar to search by tool name or content
   - Quit button
 
-### Don't want the mascot for a session?
-1. Click the menubar icon (green/orange/red dot at the top of your screen)
+### Hide / Show a session
+1. Click the menubar icon
 2. Find the session → click **Hide**
-3. That mascot disappears and the session falls back to normal Claude Code terminal permissions
-4. Click **Show** anytime to bring it back
+3. The mascot disappears — permission requests fall through to **Claude Code's own terminal prompt** (nothing is auto-approved)
+4. Click **Show** anytime to hand control back to Guardian
 
 ### Fallback Behavior
 - If the Guardian app isn't running, the hook exits silently and Claude Code falls back to its own built-in permission prompts
@@ -214,11 +223,12 @@ Set `"mascot"` in config for the default, or **click any mascot on screen** to c
 ### Hooks (installed in `~/.claude/settings.json`)
 | Hook | Script | Purpose |
 |------|--------|---------|
-| `PreToolUse` | `hook/pre_tool_use.py` | Intercepts tool calls, blocks until user approves/denies |
-| `PermissionRequest` | `hook/permission_request.py` | Intercepts built-in "Yes/No" permission prompts |
+| `PreToolUse` | `hook/pre_tool_use.py` | Intercepts tool calls already in the allow list; handles cost tracking |
+| `PermissionRequest` | `hook/permission_request.py` | Intercepts built-in "Yes/No" permission prompts for all other tools |
 | `SessionStart` | `hook/session_lifecycle.py` | Notifies Guardian to spawn a mascot |
 | `SessionEnd` | `hook/session_lifecycle.py` | Notifies Guardian to remove the mascot |
-| `Notification` | `hook/notification.py` | Forwards notifications as speech bubbles on mascot |
+| `Notification` | `hook/notification.py` | Forwards mid-task notifications as speech bubbles on mascot |
+| `Stop` | `hook/stop.py` | Shows "Claude finished coding! ✓" when Claude stops; launches app if needed |
 
 ### Swift App (`app/ClaudeGuardian/Sources/`)
 - **`main.swift`**: App delegate with per-session window management, HTTP server (NWListener), SwiftUI views, menubar
@@ -236,10 +246,11 @@ claude-guardian/
 ├── post-install.sh                       # Installs hooks, config, launch agent
 ├── guardian.config.json                   # Default config (port, timeout, mascot, rules)
 ├── hook/
-│   ├── pre_tool_use.py                   # PreToolUse hook (blocks until decision)
+│   ├── pre_tool_use.py                   # PreToolUse hook (allowed tools + cost tracking)
 │   ├── permission_request.py             # PermissionRequest hook (built-in Yes/No prompts)
 │   ├── session_lifecycle.py              # SessionStart/SessionEnd hook (fire-and-forget)
-│   └── notification.py                   # Notification hook (speech bubbles)
+│   ├── notification.py                   # Notification hook (speech bubbles)
+│   └── stop.py                           # Stop hook ("Claude finished coding!" notification)
 ├── app/
 │   └── ClaudeGuardian/
 │       ├── Info.plist                    # macOS app bundle metadata
@@ -306,15 +317,17 @@ rm -rf /path/to/claude-guardian
 
 ## Keyboard Shortcuts
 
-| Action | What it does |
-|--------|-------------|
-| `Enter` / `Return` | Allow the pending action |
-| `Escape` | Deny (first press reveals message field, second press sends) |
+| Key | Action |
+|-----|--------|
+| `⌘Y` | Allow the pending action |
+| `⌘N` | Deny (first press reveals message field, second press sends) |
 | Click mascot | Jump to that session's terminal |
 | Long press mascot | Cycle to next mascot style |
 | Click `+` / `-` | Resize the widget (scales everything) |
-| Menubar → Hide | Dismiss mascot for that session (uses normal terminal flow) |
-| Menubar → Show | Bring the mascot back |
+| Menubar → Hide | Dismiss mascot — Claude Code's own prompt handles permissions |
+| Menubar → Show | Hand control back to Guardian |
+
+Keyboard shortcuts use `⌘` to avoid accidental triggers while typing.
 
 ## Troubleshooting
 

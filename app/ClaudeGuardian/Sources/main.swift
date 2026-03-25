@@ -986,7 +986,9 @@ struct SessionWidgetView: View {
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity).padding(.vertical, 6)
                             .background(Color.red.opacity(0.7)).cornerRadius(6)
-                        }.buttonStyle(.plain)
+                        }
+                        .buttonStyle(.plain)
+                        .keyboardShortcut("n", modifiers: .command)
 
                         Button(action: {
                             appState.alwaysApprove(session: session)
@@ -1012,7 +1014,9 @@ struct SessionWidgetView: View {
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity).padding(.vertical, 6)
                             .background(Color.green.opacity(0.7)).cornerRadius(6)
-                        }.buttonStyle(.plain)
+                        }
+                        .buttonStyle(.plain)
+                        .keyboardShortcut("y", modifiers: .command)
                     }
                     .padding(.horizontal, 10)
                     .padding(.bottom, 10)
@@ -1322,9 +1326,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
 
             if session.showOverlay {
-                // Don't steal focus — just ensure the panel is visible and accepts key input.
-                // The .screenSaver level already keeps it above other windows.
                 window.orderFrontRegardless()
+                // Make the panel key so keyboard shortcuts (Y/N/Enter/Esc) work.
+                // nonactivatingPanel means the app won't steal focus from the terminal.
+                if !window.isKeyWindow {
+                    window.makeKey()
+                }
             }
         }
     }
