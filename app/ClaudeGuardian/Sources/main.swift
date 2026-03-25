@@ -409,6 +409,50 @@ class AppState: ObservableObject {
         }
     }
 
+    func alwaysApprove(session: SessionState) {
+        guard let req = session.currentRequest else { return }
+        let toolName = req.toolName
+        approve(session: session)
+        addToAutoApprove(toolName: toolName)
+    }
+
+    private func addToAutoApprove(toolName: String) {
+        guard !config.autoApprove.contains(toolName) else { return }
+
+        // Update in-memory config so this session respects it immediately
+        config = GuardianConfig(
+            port: config.port,
+            timeoutSeconds: config.timeoutSeconds,
+            autoApprove: config.autoApprove + [toolName],
+            alwaysBlock: config.alwaysBlock,
+            mascot: config.mascot
+        )
+
+        // Write to user config file so future sessions and hooks pick it up
+        let userConfigDir = NSHomeDirectory() + "/.config/claude-guardian"
+        let userConfigPath = userConfigDir + "/guardian.config.json"
+
+        var configDict: [String: Any] = [:]
+        // Prefer user config, fall back to bundled as template
+        let readPath = FileManager.default.fileExists(atPath: userConfigPath)
+            ? userConfigPath : AppState.configFilePath()
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: readPath)),
+           let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            configDict = json
+        }
+
+        var autoApprove = configDict["auto_approve"] as? [String] ?? []
+        if !autoApprove.contains(toolName) {
+            autoApprove.append(toolName)
+            configDict["auto_approve"] = autoApprove
+        }
+
+        try? FileManager.default.createDirectory(atPath: userConfigDir, withIntermediateDirectories: true)
+        if let data = try? JSONSerialization.data(withJSONObject: configDict, options: .prettyPrinted) {
+            try? data.write(to: URL(fileURLWithPath: userConfigPath))
+        }
+    }
+
     func deny(session: SessionState, message: String = "") {
         guard let req = session.currentRequest else { return }
         playSound("Basso")  // deny sound
@@ -906,7 +950,7 @@ struct SessionWidgetView: View {
                             .padding(.horizontal, 10)
                     }
 
-                    HStack(spacing: 8) {
+                    HStack(spacing: 6) {
                         Button(action: {
                             if showDenyField {
                                 appState.deny(session: session, message: denyMessage)
@@ -920,6 +964,19 @@ struct SessionWidgetView: View {
                             .foregroundColor(.white)
                             .frame(maxWidth: .infinity).padding(.vertical, 6)
                             .background(Color.red.opacity(0.7)).cornerRadius(6)
+                        }.buttonStyle(.plain)
+
+                        Button(action: {
+                            appState.alwaysApprove(session: session)
+                            showDenyField = false; denyMessage = ""
+                        }) {
+                            HStack(spacing: 2) {
+                                Text("★"); Text("Always")
+                            }
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                            .foregroundColor(.white)
+                            .frame(maxWidth: .infinity).padding(.vertical, 6)
+                            .background(Color(red: 0.85, green: 0.6, blue: 0.1).opacity(0.85)).cornerRadius(6)
                         }.buttonStyle(.plain)
 
                         Button(action: {
