@@ -38,7 +38,7 @@ struct PermissionRequest: Identifiable, Codable {
 }
 
 enum RequestStatus: String, Codable {
-    case pending, approved, denied, timeout
+    case pending, approved, denied, timeout, passthrough
 }
 
 enum AnyCodableValue: Codable {
@@ -285,14 +285,22 @@ class AppState: ObservableObject {
     }
 
     static func configFilePath() -> String {
+        let home = NSHomeDirectory()
+        // 1. User config (written by post-install.sh, editable by user)
+        let userConfig = "\(home)/.config/claude-guardian/guardian.config.json"
+        if FileManager.default.fileExists(atPath: userConfig) {
+            return userConfig
+        }
+        // 2. Bundled config inside the .app (Contents/Resources/guardian.config.json)
         let execPath = ProcessInfo.processInfo.arguments[0]
         let execDir = (execPath as NSString).deletingLastPathComponent
-        let nearby = (execDir as NSString).appendingPathComponent("../../guardian.config.json")
-        if FileManager.default.fileExists(atPath: (nearby as NSString).standardizingPath) {
-            return (nearby as NSString).standardizingPath
+        let bundled = (execDir as NSString).appendingPathComponent("../Resources/guardian.config.json")
+        let bundledStd = (bundled as NSString).standardizingPath
+        if FileManager.default.fileExists(atPath: bundledStd) {
+            return bundledStd
         }
-        let home = NSHomeDirectory()
-        return "\(home)/Desktop/claude anime terminal notifs/claude-guardian/guardian.config.json"
+        // 3. Fall back to user config path even if it doesn't exist yet — it will be created
+        return userConfig
     }
 
     // MARK: Session lifecycle
@@ -339,7 +347,12 @@ class AppState: ObservableObject {
         lock.lock()
         hiddenSessionIds.insert(sessionId)
         lock.unlock()
-        print("SESSION HIDDEN: \(sessionId) — hiddenIds now: \(hiddenSessionIds)")
+    }
+
+    func unhideSession(_ sessionId: String) {
+        lock.lock()
+        hiddenSessionIds.remove(sessionId)
+        lock.unlock()
     }
 
     func submitRequest(_ request: PermissionRequest) -> String {
@@ -348,10 +361,11 @@ class AppState: ObservableObject {
         lock.unlock()
 
         print("SUBMIT REQUEST for session \(request.sessionId) — isHidden=\(isHidden)")
-        // If session is hidden, auto-approve so hook doesn't hang
+        // If session is hidden, passthrough — hooks exit 0 with no output so
+        // Claude Code falls back to its own terminal permission prompt.
         if isHidden {
             lock.lock()
-            decisions[request.id] = (status: .approved, message: "")
+            decisions[request.id] = (status: .passthrough, message: "")
             lock.unlock()
             return request.id
         }
@@ -362,15 +376,23 @@ class AppState: ObservableObject {
         lock.unlock()
 
         DispatchQueue.main.async {
-            playSound("Submarine")  // alert sound when permission needed
             let session: SessionState
             if let existing = self.sessions.first(where: { $0.id == request.sessionId }) {
+                // Re-check hidden state on main thread — the hide click and the HTTP
+                // request can race, so isHidden above may have been stale.
+                if existing.hidden {
+                    self.lock.lock()
+                    self.decisions[request.id] = (status: .passthrough, message: "")
+                    self.lock.unlock()
+                    return
+                }
                 session = existing
             } else {
                 let newSession = SessionState(id: request.sessionId, cwd: "", timeout: self.config.timeoutSeconds, mascot: self.config.mascot)
                 self.sessions.append(newSession)
                 session = newSession
             }
+            playSound("Submarine")  // alert sound when permission needed
             session.currentRequest = request
             session.status = .pendingPermission
             session.countdown = self.config.timeoutSeconds
@@ -1135,6 +1157,7 @@ struct HistoryView: View {
                         Button(action: {
                             if session.hidden {
                                 session.hidden = false
+                                appState.unhideSession(session.id)
                             } else {
                                 session.hidden = true
                                 appState.hideSession(session.id)

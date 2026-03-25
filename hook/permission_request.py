@@ -93,6 +93,8 @@ def poll_for_decision(request_id, timeout=300):
                 continue
             elif status == "approved":
                 return "allow", data.get("message", "")
+            elif status == "passthrough":
+                return "passthrough", ""
             elif status == "denied":
                 return "deny", data.get("message", "User denied this action")
             elif status == "timeout":
@@ -193,6 +195,9 @@ def main():
             }
         }
         print(json.dumps(result))
+        sys.exit(0)
+    elif decision == "passthrough":
+        # Mascot is hidden — exit with no output so Claude Code shows its own prompt
         sys.exit(0)
     elif decision == "deny":
         result = {
