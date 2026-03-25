@@ -97,11 +97,30 @@ def notify(event, session_id, cwd="", terminal_pid=0, terminal_app="", terminal_
         pass
 
 
+def is_bypass_mode():
+    """Check if Claude was started with --dangerously-skip-permissions."""
+    try:
+        cur = os.getpid()
+        while cur and cur != 1:
+            ppid = int(os.popen(f"ps -o ppid= -p {cur} 2>/dev/null").read().strip() or "1")
+            args = os.popen(f"ps -o args= -p {ppid} 2>/dev/null").read().strip()
+            if "dangerously-skip-permissions" in args:
+                return True
+            cur = ppid
+    except Exception:
+        pass
+    return False
+
+
 def main():
     raw = sys.stdin.read()
     try:
         data = json.loads(raw)
     except json.JSONDecodeError:
+        sys.exit(0)
+
+    # Don't spawn a mascot at all in bypass mode
+    if is_bypass_mode():
         sys.exit(0)
 
     event = data.get("hook_event_name", "")
