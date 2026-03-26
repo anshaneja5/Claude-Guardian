@@ -9,11 +9,5 @@
     "Grep",
     "LS"
   ],
-  "always_block": [],
-  "ask": [
-    "Bash",
-    "Write",
-    "Edit",
-    "NotebookEdit"
-  ]
+  "always_block": []
 }

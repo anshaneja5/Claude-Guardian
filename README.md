@@ -195,8 +195,7 @@ Edit `~/.config/claude-guardian/guardian.config.json` (created during setup):
   "timeout_seconds": 300,
   "mascot": "cat",
   "auto_approve": ["Read", "Glob", "Grep", "LS"],
-  "always_block": [],
-  "ask": ["Bash", "Write", "Edit", "NotebookEdit"]
+  "always_block": []
 }
 ```
 
@@ -205,9 +204,8 @@ Edit `~/.config/claude-guardian/guardian.config.json` (created during setup):
 | `port` | HTTP port for hook-to-app communication (default `9001`) |
 | `timeout_seconds` | Auto-deny after this many seconds of no response (default `300`) |
 | `mascot` | Default mascot for new sessions (can be changed per-session by clicking) |
-| `auto_approve` | Tool names that pass through without asking |
-| `always_block` | Tool names that are always denied |
-| `ask` | Tool names that show the permission overlay |
+| `auto_approve` | Tools that pass through without asking. You can also click **★ Always** on any prompt to add a tool here automatically. |
+| `always_block` | Tools that are always denied without prompting. Note: Claude Code's own `permissions.deny` in `~/.claude/settings.json` does the same thing at the system level — use whichever you prefer. |
 
 ### Mascots
 
