@@ -1140,6 +1140,14 @@ struct HistoryView: View {
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.secondary)
             }
+
+            HStack(spacing: 4) {
+                Text("🔌")
+                    .font(.system(size: 10))
+                Text("Listening on port \(appState.config.port)")
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
+            }
             .padding(.bottom, 4)
 
             // Active sessions with hide buttons
